@@ -1,0 +1,33 @@
+<resources>
+    <string name="app_name">BritSpeak</string>
+    <string name="tagline">Speak English with Emma</string>
+
+    <string name="nav_practice">Practice</string>
+    <string name="nav_topics">Topics</string>
+    <string name="nav_history">History</string>
+    <string name="nav_settings">Settings</string>
+
+    <string name="cd_microphone">Tap and hold to speak</string>
+    <string name="cd_listening">Listening…</string>
+    <string name="cd_speaking">Emma is speaking</string>
+    <string name="cd_thinking">Emma is thinking</string>
+
+    <string name="action_repeat">Repeat after Emma</string>
+    <string name="action_play">Play again</string>
+    <string name="action_show_english">English</string>
+    <string name="action_show_chinese">中文</string>
+    <string name="action_send">Send</string>
+
+    <string name="settings_api_key">Anthropic API key</string>
+    <string name="settings_api_key_hint">sk-ant-…</string>
+    <string name="settings_feedback_language">Correction language</string>
+    <string name="settings_level">Your level</string>
+    <string name="settings_saved">Saved</string>
+
+    <string name="topic_of_the_day">Topic of the day</string>
+    <string name="continue_last">Continue last conversation</string>
+    <string name="start_new">Start new conversation</string>
+
+    <string name="permission_mic_rationale">BritSpeak needs the microphone so you can speak and get feedback.</string>
+    <string name="error_no_api_key">Add your Anthropic API key in Settings to start chatting.</string>
+</resources>

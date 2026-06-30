@@ -1,0 +1,253 @@
+package com.englishteacher.britspeak.ui.chat
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.englishteacher.britspeak.data.prefs.ApiKeyStore
+import com.englishteacher.britspeak.data.prefs.SettingsStore
+import com.englishteacher.britspeak.speech.SpeechToText
+import com.englishteacher.britspeak.speech.SttCallback
+import com.englishteacher.britspeak.speech.TutorVoice
+import com.englishteacher.core.catalog.TopicCatalog
+import com.englishteacher.core.domain.model.ConversationSession
+import com.englishteacher.core.domain.model.FeedbackLanguage
+import com.englishteacher.core.domain.model.Speaker
+import com.englishteacher.core.domain.port.Clock
+import com.englishteacher.core.domain.port.LearnerPreferences
+import com.englishteacher.core.usecase.ContinueSessionUseCase
+import com.englishteacher.core.usecase.DailyTopicSelector
+import com.englishteacher.core.usecase.RepeatScorer
+import com.englishteacher.core.usecase.SendUtteranceUseCase
+import com.englishteacher.core.usecase.StartSessionUseCase
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+/**
+ * Drives the practice screen: orchestrates speech-to-text, the tutor use-cases, and
+ * text-to-speech, and exposes a single [ChatUiState].
+ */
+@HiltViewModel
+class ChatViewModel
+    @Inject
+    constructor(
+        private val startSession: StartSessionUseCase,
+        private val sendUtterance: SendUtteranceUseCase,
+        private val continueSession: ContinueSessionUseCase,
+        private val repeatScorer: RepeatScorer,
+        private val stt: SpeechToText,
+        private val voice: TutorVoice,
+        private val settingsStore: SettingsStore,
+        private val apiKeyStore: ApiKeyStore,
+        private val catalog: TopicCatalog,
+        private val dailyTopicSelector: DailyTopicSelector,
+        private val clock: Clock,
+    ) : ViewModel() {
+        private val _state = MutableStateFlow(ChatUiState())
+        val state: StateFlow<ChatUiState> = _state.asStateFlow()
+
+        private var listeningForRepeat = false
+
+        init {
+            viewModelScope.launch {
+                val prefs = settingsStore.preferences.first()
+                _state.update {
+                    it.copy(
+                        feedbackLanguage = prefs.feedbackLanguage,
+                        hasApiKey = apiKeyStore.hasKey,
+                    )
+                }
+            }
+        }
+
+        /** Refreshes flags that may have changed while away (e.g. API key added in Settings). */
+        fun refresh() {
+            viewModelScope.launch {
+                val prefs = settingsStore.preferences.first()
+                _state.update {
+                    it.copy(hasApiKey = apiKeyStore.hasKey, feedbackLanguage = prefs.feedbackLanguage)
+                }
+            }
+        }
+
+        /** Resume the most recent conversation, or start today's topic if there is none. */
+        fun resumeOrStartDaily() {
+            val daily = dailyTopicSelector.topicForTimestamp(clock.nowMillis())
+            resumeOrStart(daily.id)
+        }
+
+        /** Resume the most recent conversation, or start one on [fallbackTopicId] if none exists. */
+        fun resumeOrStart(fallbackTopicId: String) {
+            viewModelScope.launch {
+                val existing = continueSession.mostRecent()
+                if (existing != null) {
+                    bind(existing)
+                } else {
+                    startOnTopic(fallbackTopicId)
+                }
+            }
+        }
+
+        /** Start a fresh conversation on a chosen topic. */
+        fun startOnTopic(topicId: String) {
+            viewModelScope.launch {
+                val topic = catalog.byId(topicId) ?: catalog.freeChat
+                val prefs = currentPreferences()
+                val session = startSession(topic, prefs)
+                bind(session)
+                // Speak the opener line.
+                session.messages.lastOrNull()?.let { speak(it.text, andThen = ChatPhase.IDLE) }
+            }
+        }
+
+        fun openSession(sessionId: String) {
+            viewModelScope.launch {
+                continueSession.byId(sessionId)?.let(::bind)
+            }
+        }
+
+        /** Begin capturing the learner's speech for a normal turn. */
+        fun startListening() {
+            if (!_state.value.canSpeak) return
+            listeningForRepeat = false
+            beginRecognition(ChatPhase.LISTENING)
+        }
+
+        /** Begin capturing the learner repeating the [ChatUiState.pendingRepeat] target. */
+        fun startRepeat() {
+            if (_state.value.pendingRepeat == null) return
+            listeningForRepeat = true
+            beginRecognition(ChatPhase.REPEATING)
+        }
+
+        fun stopListening() {
+            stt.stopListening()
+        }
+
+        /** Replay a tutor message via TTS. */
+        fun replay(text: String) {
+            speak(text, andThen = ChatPhase.IDLE)
+        }
+
+        fun toggleFeedbackLanguage() {
+            val next =
+                if (_state.value.feedbackLanguage == FeedbackLanguage.CHINESE) {
+                    FeedbackLanguage.ENGLISH
+                } else {
+                    FeedbackLanguage.CHINESE
+                }
+            _state.update { it.copy(feedbackLanguage = next) }
+            viewModelScope.launch { settingsStore.setFeedbackLanguage(next) }
+        }
+
+        fun dismissError() = _state.update { it.copy(error = null) }
+
+        fun dismissRepeatScore() = _state.update { it.copy(lastRepeatScore = null) }
+
+        // --- internals ---
+
+        private fun bind(session: ConversationSession) {
+            val pending =
+                session.messages.lastOrNull { it.speaker == Speaker.TUTOR }?.repeatTarget
+            _state.update {
+                it.copy(
+                    session = session,
+                    topicTitle = session.title,
+                    feedbackLanguage = session.feedbackLanguage,
+                    pendingRepeat = pending,
+                    phase = ChatPhase.IDLE,
+                )
+            }
+        }
+
+        private fun beginRecognition(phase: ChatPhase) {
+            if (!stt.isAvailable) {
+                _state.update { it.copy(error = "Speech recognition isn't available on this device.") }
+                return
+            }
+            _state.update { it.copy(phase = phase, partialTranscript = "", error = null) }
+            stt.startListening(
+                localeTag = "en-GB",
+                callback =
+                    object : SttCallback {
+                        override fun onPartial(text: String) {
+                            _state.update { it.copy(partialTranscript = text) }
+                        }
+
+                        override fun onResult(text: String) {
+                            _state.update { it.copy(partialTranscript = "") }
+                            if (listeningForRepeat) {
+                                scoreRepeat(text)
+                            } else {
+                                submit(text)
+                            }
+                        }
+
+                        override fun onError(message: String) {
+                            _state.update { it.copy(phase = ChatPhase.IDLE, error = message) }
+                        }
+                    },
+            )
+        }
+
+        private fun submit(text: String) {
+            val session = _state.value.session ?: return
+            if (text.isBlank()) {
+                _state.update { it.copy(phase = ChatPhase.IDLE) }
+                return
+            }
+            _state.update { it.copy(phase = ChatPhase.THINKING, isBusy = true) }
+            viewModelScope.launch {
+                runCatching { sendUtterance(session, text) }
+                    .onSuccess { result ->
+                        _state.update {
+                            it.copy(
+                                session = result.session,
+                                pendingRepeat = result.turn.repeatTarget,
+                                isBusy = false,
+                            )
+                        }
+                        speak(result.turn.reply, andThen = ChatPhase.IDLE)
+                    }
+                    .onFailure { error ->
+                        _state.update {
+                            it.copy(
+                                phase = ChatPhase.IDLE,
+                                isBusy = false,
+                                error = error.message ?: "Something went wrong. Please try again.",
+                            )
+                        }
+                    }
+            }
+        }
+
+        private fun scoreRepeat(text: String) {
+            val target = _state.value.pendingRepeat ?: return
+            val score = repeatScorer.score(target, text)
+            _state.update { it.copy(phase = ChatPhase.IDLE, lastRepeatScore = score) }
+        }
+
+        private fun speak(
+            text: String,
+            andThen: ChatPhase,
+        ) {
+            _state.update { it.copy(phase = ChatPhase.SPEAKING) }
+            voice.speak(
+                text = text,
+                onDone = { _state.update { if (it.phase == ChatPhase.SPEAKING) it.copy(phase = andThen) else it } },
+            )
+        }
+
+        private suspend fun currentPreferences(): LearnerPreferences =
+            settingsStore.preferences.first()
+
+        override fun onCleared() {
+            stt.release()
+            voice.release()
+            super.onCleared()
+        }
+    }
