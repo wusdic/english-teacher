@@ -8,6 +8,7 @@ import com.englishteacher.core.domain.model.FeedbackLanguage
 import com.englishteacher.core.domain.model.ProficiencyLevel
 import com.englishteacher.core.domain.model.Speaker
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
 /**
@@ -17,6 +18,7 @@ import kotlinx.serialization.json.Json
  */
 object SessionMappers {
     private val json = Json { ignoreUnknownKeys = true }
+    private val messageListSerializer = ListSerializer(PersistedMessage.serializer())
 
     @Serializable
     private data class PersistedCorrection(
@@ -66,13 +68,13 @@ object SessionMappers {
             updatedAtMillis = session.updatedAtMillis,
             proficiency = session.proficiency.name,
             feedbackLanguage = session.feedbackLanguage.name,
-            messagesJson = json.encodeToString(messages),
+            messagesJson = json.encodeToString(messageListSerializer, messages),
         )
     }
 
     fun toDomain(entity: SessionEntity): ConversationSession {
         val messages =
-            json.decodeFromString<List<PersistedMessage>>(entity.messagesJson).map { m ->
+            json.decodeFromString(messageListSerializer, entity.messagesJson).map { m ->
                 ChatMessage(
                     id = m.id,
                     speaker = Speaker.valueOf(m.speaker),

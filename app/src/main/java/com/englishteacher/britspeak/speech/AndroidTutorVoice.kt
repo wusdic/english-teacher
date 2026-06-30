@@ -45,23 +45,23 @@ class AndroidTutorVoice
             tts.setOnUtteranceProgressListener(
                 object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String) {
-                        callbacks[utteranceId]?.first?.let { cb -> main.post(cb) }
+                        callbacks[utteranceId]?.first?.let { cb -> postMain { cb() } }
                     }
 
                     override fun onDone(utteranceId: String) {
-                        callbacks.remove(utteranceId)?.second?.let { cb -> main.post(cb) }
+                        callbacks.remove(utteranceId)?.second?.let { cb -> postMain { cb() } }
                     }
 
                     @Deprecated("Deprecated in Java")
                     override fun onError(utteranceId: String) {
-                        callbacks.remove(utteranceId)?.second?.let { cb -> main.post(cb) }
+                        callbacks.remove(utteranceId)?.second?.let { cb -> postMain { cb() } }
                     }
 
                     override fun onError(
                         utteranceId: String,
                         errorCode: Int,
                     ) {
-                        callbacks.remove(utteranceId)?.second?.let { cb -> main.post(cb) }
+                        callbacks.remove(utteranceId)?.second?.let { cb -> postMain { cb() } }
                     }
                 },
             )
@@ -88,11 +88,16 @@ class AndroidTutorVoice
 
         override fun stop() {
             tts.stop()
-            callbacks.keys.toList().forEach { id -> callbacks.remove(id)?.second?.let(main::post) }
+            callbacks.keys.toList().forEach { id -> callbacks.remove(id)?.second?.let { cb -> postMain { cb() } } }
         }
 
         override fun release() {
             tts.stop()
             tts.shutdown()
+        }
+
+        /** Posts [block] to the main thread (lambda literal so it SAM-converts to Runnable). */
+        private fun postMain(block: () -> Unit) {
+            main.post { block() }
         }
     }
