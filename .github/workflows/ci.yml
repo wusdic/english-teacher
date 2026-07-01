@@ -60,6 +60,7 @@ jobs:
         run: |
           test -f app/src/main/assets/vosk-model/am/final.mdl
           test -d app/src/main/assets/vosk-model/graph
+          test -f app/src/main/assets/vosk-model/uuid
           echo "Model size:"; du -sh app/src/main/assets/vosk-model
 
       - name: Build debug APK

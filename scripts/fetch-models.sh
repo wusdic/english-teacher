@@ -22,3 +22,11 @@ else
   mv vosk-model-small-en-us-0.15 "$VOSK_DIR"
   echo "Vosk model ready at $ASSETS_DIR/$VOSK_DIR"
 fi
+
+# vosk-android's StorageService.unpack requires a 'uuid' marker file inside the model dir to
+# decide whether it needs (re)unpacking. The stock model zip does not ship one, which makes
+# unpack fail with "vosk-model/uuid". Create a stable marker so unpacking succeeds.
+if [ ! -f "$VOSK_DIR/uuid" ]; then
+  echo "vosk-model-small-en-us-0.15" > "$VOSK_DIR/uuid"
+  echo "Wrote $VOSK_DIR/uuid marker"
+fi
