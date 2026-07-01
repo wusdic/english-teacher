@@ -249,6 +249,19 @@ class ChatViewModel
                 var heldSentence: String? = null
                 var speakingStarted = false
 
+                // Return to IDLE from either SPEAKING (audio finished) or THINKING (e.g. the TTS
+                // engine wasn't ready, so onStart never fired and we never reached SPEAKING) — but
+                // never clobber a phase the learner has since moved on to (LISTENING/REPEATING).
+                fun settleToIdle() {
+                    _state.update {
+                        if (it.phase == ChatPhase.SPEAKING || it.phase == ChatPhase.THINKING) {
+                            it.copy(phase = ChatPhase.IDLE)
+                        } else {
+                            it
+                        }
+                    }
+                }
+
                 fun enqueueHeld(onSpoken: (() -> Unit)? = null) {
                     val toSpeak = heldSentence ?: return
                     heldSentence = null
@@ -286,21 +299,9 @@ class ChatViewModel
                                     )
                                 }
                                 if (heldSentence == null) {
-                                    _state.update {
-                                        if (it.phase == ChatPhase.SPEAKING || it.phase == ChatPhase.THINKING) {
-                                            it.copy(phase = ChatPhase.IDLE)
-                                        } else {
-                                            it
-                                        }
-                                    }
+                                    settleToIdle()
                                 } else {
-                                    enqueueHeld(
-                                        onSpoken = {
-                                            _state.update {
-                                                if (it.phase == ChatPhase.SPEAKING) it.copy(phase = ChatPhase.IDLE) else it
-                                            }
-                                        },
-                                    )
+                                    enqueueHeld(onSpoken = { settleToIdle() })
                                 }
                             }
                         }

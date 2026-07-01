@@ -70,6 +70,24 @@ class ChatViewModelTest {
         override fun release() {}
     }
 
+    /**
+     * Voice that fires only [onDone] and never [onStart] — mirrors [AndroidTutorVoice]'s behaviour
+     * when the TTS engine isn't ready yet (it posts onDone via a fallback without ever starting).
+     */
+    private class DoneOnlyVoice : TutorVoice {
+        override fun speak(text: String, onStart: () -> Unit, onDone: () -> Unit) {
+            onDone()
+        }
+
+        override fun enqueue(text: String, onStart: () -> Unit, onDone: () -> Unit) {
+            onDone()
+        }
+
+        override fun stop() {}
+
+        override fun release() {}
+    }
+
     private class FakeStt(private val result: String) : SpeechToText {
         override val isAvailable = true
 
@@ -116,6 +134,7 @@ class ChatViewModelTest {
         repo: SessionRepository = InMemoryRepo(),
         engine: TutorEngine = engineReturning(TutorTurn("Hi there!", emptyList(), null)),
         stt: SpeechToText = FakeStt("hello"),
+        voice: TutorVoice = ImmediateVoice(),
     ): ChatViewModel {
         val settings = mockk<SettingsStore>()
         every { settings.preferences } returns flowOf(LearnerPreferences())
@@ -132,7 +151,7 @@ class ChatViewModelTest {
             continueSession = ContinueSessionUseCase(repo),
             repeatScorer = RepeatScorer(),
             stt = stt,
-            voice = ImmediateVoice(),
+            voice = voice,
             settingsStore = settings,
             apiKeyStore = apiKey,
             catalog = TopicCatalog,
@@ -230,5 +249,23 @@ class ChatViewModelTest {
             assertEquals("Anything to drink?", state.pendingRepeat)
             assertEquals(3, state.session?.messages?.size)
             assertEquals(ChatPhase.IDLE, state.phase)
+        }
+
+    @Test
+    fun `phase returns to idle even if the tts engine never fires onStart`() =
+        runTest {
+            // Regression: when TTS isn't ready it fires only onDone (never onStart), so the phase
+            // never reaches SPEAKING. The turn must still settle back to IDLE, not stick in THINKING.
+            val turn = TutorTurn("All good, carry on!", emptyList(), "Carry on.")
+            val vm =
+                buildViewModel(
+                    engine = streamingEngine(deltas = listOf("All good, carry on!"), turn = turn),
+                    stt = FakeStt("okay"),
+                    voice = DoneOnlyVoice(),
+                )
+            vm.startOnTopic("free_chat")
+            vm.startListening()
+
+            assertEquals(ChatPhase.IDLE, vm.state.value.phase)
         }
 }
