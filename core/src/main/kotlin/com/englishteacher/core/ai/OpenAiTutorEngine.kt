@@ -38,6 +38,12 @@ class OpenAiTutorEngine(
     private val json = Json { encodeDefaults = true; explicitNulls = false }
     private val envelopeJson = Json { ignoreUnknownKeys = true }
 
+    // Some OpenAI-compatible providers (e.g. MiniMax) reject `response_format`. Once we learn that,
+    // skip the doomed JSON-mode attempt on every later turn so replies aren't slowed by a failed
+    // round-trip each time. The engine instance is reused for the whole app session.
+    @Volatile
+    private var jsonModeSupported = true
+
     override suspend fun respond(
         session: ConversationSession,
         userUtterance: String,
@@ -73,12 +79,19 @@ class OpenAiTutorEngine(
         }
 
         // Prefer JSON mode; some OpenAI-compatible endpoints (e.g. MiniMax) don't support
-        // `response_format`, so fall back to a plain request (the prompt still asks for JSON and
-        // the parser tolerates fences/whitespace).
+        // `response_format`. If a JSON-mode attempt fails, retry once without it (the prompt still
+        // asks for JSON and the parser tolerates prose/fences) and remember to skip JSON mode on
+        // every subsequent turn, so replies stay fast.
+        if (!jsonModeSupported) {
+            return requestOnce(messages, jsonMode = false)
+        }
         return try {
             requestOnce(messages, jsonMode = true)
         } catch (e: TutorEngineException) {
-            requestOnce(messages, jsonMode = false)
+            val turn = requestOnce(messages, jsonMode = false)
+            // Only reached when the no-JSON retry succeeded — JSON mode was the culprit.
+            jsonModeSupported = false
+            turn
         }
     }
 

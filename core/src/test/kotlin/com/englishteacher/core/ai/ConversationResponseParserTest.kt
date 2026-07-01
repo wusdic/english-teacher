@@ -100,7 +100,31 @@ class ConversationResponseParserTest {
     }
 
     @Test
-    fun `malformed json is rejected`() {
-        assertFailsWith<TutorEngineException> { parser.parse("not json at all") }
+    fun `json wrapped in prose is still parsed`() {
+        // Some models (e.g. MiniMax) prepend/append chatter despite the "JSON only" instruction.
+        val text =
+            """
+            Sure, here is my response:
+            {"reply":"Nice to meet you!","hasErrors":false,"corrections":[],"repeatTarget":"Nice to meet you."}
+            Hope that helps!
+            """.trimIndent()
+
+        val turn = parser.parse(text)
+        assertEquals("Nice to meet you!", turn.reply)
+        assertEquals("Nice to meet you.", turn.repeatTarget)
+    }
+
+    @Test
+    fun `plain prose with no json is spoken as the reply`() {
+        // Graceful degradation: rather than failing the turn, speak whatever the model said.
+        val turn = parser.parse("Hello there, how are you today?")
+        assertEquals("Hello there, how are you today?", turn.reply)
+        assertTrue(turn.corrections.isEmpty())
+        assertNull(turn.repeatTarget)
+    }
+
+    @Test
+    fun `empty content is rejected`() {
+        assertFailsWith<TutorEngineException> { parser.parse("   ") }
     }
 }
