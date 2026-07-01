@@ -39,6 +39,8 @@ jobs:
   android-build:
     name: Android app build & unit tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -62,6 +64,25 @@ jobs:
 
       - name: Compile instrumentation tests
         run: ./gradlew :app:assembleDebugAndroidTest --no-daemon --stacktrace
+
+      - name: Rename APK for release
+        if: github.event_name == 'push'
+        run: |
+          mkdir -p release
+          cp app/build/outputs/apk/debug/app-debug.apk release/britspeak-debug.apk
+
+      - name: Publish APK to a GitHub Release (direct download link)
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: debug-latest
+          name: BritSpeak debug (latest)
+          body: |
+            Latest debug build of BritSpeak (auto-published by CI).
+            Install `britspeak-debug.apk` on Android (allow "install unknown apps").
+            Set your model provider + API key in Settings on first launch.
+          files: release/britspeak-debug.apk
+          prerelease: true
 
       - name: Upload debug APK
         if: always()
