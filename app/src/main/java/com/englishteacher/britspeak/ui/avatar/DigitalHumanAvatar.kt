@@ -1,5 +1,6 @@
 package com.englishteacher.britspeak.ui.avatar
 
+import android.graphics.BitmapFactory
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -8,19 +9,25 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -29,10 +36,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import java.io.File
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.sin
+
+/** Filename, inside the app's private files dir, of the user-chosen avatar portrait. */
+const val AVATAR_PORTRAIT_FILENAME = "avatar_portrait.img"
+
+/** Absolute [File] where the user-chosen avatar portrait is stored (may not exist yet). */
+fun avatarPortraitFile(context: android.content.Context): File =
+    File(context.filesDir, AVATAR_PORTRAIT_FILENAME)
 
 /**
  * A cute, refined, fully-animated tutor avatar: an **original** green-haired forest-sprite girl
@@ -40,9 +55,12 @@ import kotlin.math.sin
  * Blinks, breathes, sways her hair and floats gently; her mouth animates while speaking.
  *
  * Everything is drawn with Compose [Canvas] (no bundled artwork, so it ships clean of any
- * third-party IP). To use your own licensed portrait instead, drop a drawable named
- * `avatar_portrait` into `res/drawable/` — it will be rendered with the same float/breathe
- * animation over this scene.
+ * third-party IP). The user can tap the avatar to pick a photo from their phone — it is saved
+ * locally (see [avatarPortraitFile]) and rendered here with the same float/breathe animation,
+ * fully offline. Passing a non-zero [imageVersion] forces a reload after the file changes.
+ *
+ * @param imageVersion bump this to reload the portrait after the user picks a new image.
+ * @param onClick invoked when the avatar is tapped (used to open the image picker).
  */
 @Composable
 fun DigitalHumanAvatar(
@@ -50,6 +68,8 @@ fun DigitalHumanAvatar(
     modifier: Modifier = Modifier,
     amplitude: Float = 0f,
     size: Dp = 240.dp,
+    imageVersion: Int = 0,
+    onClick: (() -> Unit)? = null,
 ) {
     val transition = rememberInfiniteTransition(label = "avatar")
 
@@ -92,17 +112,52 @@ fun DigitalHumanAvatar(
             }.getOrDefault(0)
         }
 
+    // User-chosen portrait saved locally (offline). Reloaded whenever [imageVersion] changes.
+    val userPortrait =
+        remember(imageVersion) {
+            runCatching {
+                val f = avatarPortraitFile(context)
+                if (f.exists() && f.length() > 0) {
+                    BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap()
+                } else {
+                    null
+                }
+            }.getOrNull()
+        }
+
     val bob = sin(bobPhase) // -1..1
     val sway = sin(swayPhase)
 
-    Box(modifier = modifier.size(size), contentAlignment = Alignment.Center) {
+    val boxModifier =
+        modifier
+            .size(size)
+            .clip(RoundedCornerShape(24.dp))
+            .let { if (onClick != null) it.clickable { onClick() } else it }
+
+    Box(modifier = boxModifier, contentAlignment = Alignment.Center) {
         // Forest background + drifting motes (always drawn).
         Canvas(modifier = Modifier.fillMaxSize()) {
             drawForestScene(mood = mood, motes = motes, sway = sway)
         }
 
-        if (portraitId != 0) {
-            // User-supplied licensed portrait, gently animated.
+        if (userPortrait != null) {
+            // User-picked photo (from the phone), gently animated. Highest priority.
+            Image(
+                bitmap = userPortrait,
+                contentDescription = "Tutor",
+                contentScale = ContentScale.Crop,
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationY = bob * this.size.height * 0.02f
+                            val s = 0.99f + 0.02f * breathe
+                            scaleX = s
+                            scaleY = s
+                        },
+            )
+        } else if (portraitId != 0) {
+            // Optional bundled drawable portrait, gently animated.
             Image(
                 painter = painterResource(id = portraitId),
                 contentDescription = "Tutor",
@@ -136,6 +191,25 @@ fun DigitalHumanAvatar(
                     sway = sway,
                     eyeOpenness = eyeOpen,
                     mouthOpenness = mouthOpen,
+                )
+            }
+        }
+
+        // "Tap to change the avatar" hint chip.
+        if (onClick != null) {
+            androidx.compose.foundation.layout.Box(
+                modifier =
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 8.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color(0x99000000))
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+            ) {
+                androidx.compose.material3.Text(
+                    text = "点击更换形象",
+                    color = Color.White,
+                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
                 )
             }
         }

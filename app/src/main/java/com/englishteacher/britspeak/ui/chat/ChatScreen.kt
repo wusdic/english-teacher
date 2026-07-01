@@ -38,8 +38,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -49,7 +51,10 @@ import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.englishteacher.britspeak.ui.avatar.DigitalHumanAvatar
+import com.englishteacher.britspeak.ui.avatar.avatarPortraitFile
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun ChatScreen(
@@ -71,6 +76,34 @@ fun ChatScreen(
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             micGranted = granted
             if (granted) viewModel.startListening()
+        }
+
+    // Tap-the-avatar → pick a photo → save it locally → re-render as the animated character.
+    var avatarVersion by remember { mutableIntStateOf(0) }
+    val avatarPicker =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.PickVisualMedia(),
+        ) { uri ->
+            if (uri != null) {
+                scope.launch {
+                    val ok =
+                        withContext(Dispatchers.IO) {
+                            runCatching {
+                                context.contentResolver.openInputStream(uri)?.use { input ->
+                                    avatarPortraitFile(context).outputStream().use { output ->
+                                        input.copyTo(output)
+                                    }
+                                }
+                                true
+                            }.getOrDefault(false)
+                        }
+                    if (ok) {
+                        avatarVersion++
+                    } else {
+                        snackbarHostState.showSnackbar("图片保存失败，请重试")
+                    }
+                }
+            }
         }
 
     LaunchedEffect(topicId, sessionId) {
@@ -110,6 +143,14 @@ fun ChatScreen(
             DigitalHumanAvatar(
                 mood = state.avatarMood,
                 modifier = Modifier.padding(vertical = 8.dp),
+                imageVersion = avatarVersion,
+                onClick = {
+                    avatarPicker.launch(
+                        androidx.activity.result.PickVisualMediaRequest(
+                            ActivityResultContracts.PickVisualMedia.ImageOnly,
+                        ),
+                    )
+                },
             )
 
             LazyColumn(

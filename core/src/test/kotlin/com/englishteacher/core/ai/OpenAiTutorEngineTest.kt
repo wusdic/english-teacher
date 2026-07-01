@@ -107,13 +107,41 @@ class OpenAiTutorEngineTest {
         }
 
     @Test
-    fun `non-2xx raises with api message`() =
+    fun `retries without response_format when the endpoint rejects json mode`() =
         runTest {
+            // First attempt (json mode) fails as if the provider doesn't support response_format.
             server.enqueue(
                 MockResponse()
-                    .setResponseCode(401)
-                    .setBody("""{"error":{"message":"Incorrect API key","type":"invalid_request_error"}}"""),
+                    .setResponseCode(400)
+                    .setBody("""{"error":{"message":"response_format is not supported"}}"""),
             )
+            // Retry (no json mode) succeeds.
+            server.enqueue(
+                chatResponse(
+                    """{"reply":"All good!","hasErrors":false,"corrections":[],"repeatTarget":"All good!"}""",
+                ),
+            )
+
+            val turn = engine().respond(session(), "hello")
+            assertEquals("All good!", turn.reply)
+
+            val first = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+            assertTrue(first.containsKey("response_format"))
+            val second = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+            assertTrue(!second.containsKey("response_format"), "retry must omit response_format")
+        }
+
+    @Test
+    fun `non-2xx raises with api message`() =
+        runTest {
+            // Both the json-mode attempt and the no-json-mode retry fail with the same auth error.
+            repeat(2) {
+                server.enqueue(
+                    MockResponse()
+                        .setResponseCode(401)
+                        .setBody("""{"error":{"message":"Incorrect API key","type":"invalid_request_error"}}"""),
+                )
+            }
             val ex = assertFailsWith<TutorEngineException> { engine().respond(session(), "hi") }
             assertTrue(ex.message!!.contains("Incorrect API key"))
         }

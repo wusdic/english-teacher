@@ -35,7 +35,7 @@ class OpenAiTutorEngine(
     private val httpClient: OkHttpClient = defaultClient(),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : TutorEngine {
-    private val json = Json { encodeDefaults = true }
+    private val json = Json { encodeDefaults = true; explicitNulls = false }
     private val envelopeJson = Json { ignoreUnknownKeys = true }
 
     override suspend fun respond(
@@ -72,12 +72,26 @@ class OpenAiTutorEngine(
             }
         }
 
+        // Prefer JSON mode; some OpenAI-compatible endpoints (e.g. MiniMax) don't support
+        // `response_format`, so fall back to a plain request (the prompt still asks for JSON and
+        // the parser tolerates fences/whitespace).
+        return try {
+            requestOnce(messages, jsonMode = true)
+        } catch (e: TutorEngineException) {
+            requestOnce(messages, jsonMode = false)
+        }
+    }
+
+    private suspend fun requestOnce(
+        messages: List<OpenAiMessage>,
+        jsonMode: Boolean,
+    ): TutorTurn {
         val request =
             OpenAiRequest(
                 model = config.model,
                 messages = messages,
                 maxTokens = config.maxTokens,
-                responseFormat = OpenAiResponseFormat(type = "json_object"),
+                responseFormat = if (jsonMode) OpenAiResponseFormat(type = "json_object") else null,
             )
 
         val bodyJson = json.encodeToString(OpenAiRequest.serializer(), request)
@@ -171,7 +185,7 @@ internal data class OpenAiRequest(
     val model: String,
     val messages: List<OpenAiMessage>,
     @SerialName("max_tokens") val maxTokens: Int,
-    @SerialName("response_format") val responseFormat: OpenAiResponseFormat,
+    @SerialName("response_format") val responseFormat: OpenAiResponseFormat? = null,
 )
 
 @Serializable
