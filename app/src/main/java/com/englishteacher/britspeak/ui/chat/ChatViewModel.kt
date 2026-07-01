@@ -21,6 +21,7 @@ import com.englishteacher.core.usecase.StartSessionUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
@@ -62,6 +63,18 @@ class ChatViewModel
                         hasApiKey = apiKeyStore.hasKey,
                         subtitlesEnabled = subtitles,
                     )
+                }
+            }
+            // Reflect first-run offline-model loading so the UI can show a "loading" hint.
+            viewModelScope.launch {
+                if (!stt.isAvailable && stt.isLoading) {
+                    _state.update { it.copy(sttLoading = true) }
+                    var tries = 0
+                    while (!stt.isAvailable && stt.isLoading && tries < 90) {
+                        delay(1000)
+                        tries++
+                    }
+                    _state.update { it.copy(sttLoading = false) }
                 }
             }
         }

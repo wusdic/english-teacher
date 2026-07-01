@@ -46,6 +46,9 @@ class VoskSpeechToText
         override val isAvailable: Boolean
             get() = model != null
 
+        override val isLoading: Boolean
+            get() = model == null && lastError == null && modelAssetPresent()
+
         private fun modelAssetPresent(): Boolean =
             runCatching { context.assets.list(MODEL_ASSET)?.isNotEmpty() == true }.getOrDefault(false)
 

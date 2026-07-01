@@ -35,6 +35,7 @@ data class ChatUiState(
     val lastRepeatScore: RepeatScore? = null,
     val hasApiKey: Boolean = false,
     val subtitlesEnabled: Boolean = true,
+    val sttLoading: Boolean = false,
     val isBusy: Boolean = false,
     val error: String? = null,
 ) {

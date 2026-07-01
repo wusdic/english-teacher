@@ -137,6 +137,20 @@ fun ChatScreen(
                 )
             }
 
+            if (state.sttLoading) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(6.dp),
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp))
+                    Text(
+                        text = "  离线语音模型首次加载中，请稍候…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+
             if (!state.hasApiKey) {
                 Text(
                     text = "Add your API key in Settings to start chatting.",

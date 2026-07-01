@@ -17,6 +17,9 @@ interface SttCallback {
 interface SpeechToText {
     val isAvailable: Boolean
 
+    /** True while an offline model is still loading for the first time (false if none is needed). */
+    val isLoading: Boolean get() = false
+
     fun startListening(
         localeTag: String,
         callback: SttCallback,
