@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import dagger.hilt.android.qualifiers.ApplicationContext
-import org.json.JSONObject
 import org.vosk.Model
 import org.vosk.Recognizer
 import org.vosk.android.RecognitionListener
@@ -146,12 +145,7 @@ class VoskSpeechToText
         private fun textOf(
             hypothesis: String?,
             key: String,
-        ): String? =
-            try {
-                hypothesis?.let { JSONObject(it).optString(key, "").trim() }
-            } catch (_: Throwable) {
-                null
-            }
+        ): String? = VoskHypothesisParser.extract(hypothesis, key)
 
         companion object {
             private const val SAMPLE_RATE = 16000.0f

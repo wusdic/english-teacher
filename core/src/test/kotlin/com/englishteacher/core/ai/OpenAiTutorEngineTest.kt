@@ -119,6 +119,43 @@ class OpenAiTutorEngineTest {
         }
 
     @Test
+    fun `includes prior conversation turns in the request`() =
+        runTest {
+            server.enqueue(
+                chatResponse(
+                    """{"reply":"Go on!","hasErrors":false,"corrections":[],"repeatTarget":"Go on."}""",
+                ),
+            )
+            val withHistory =
+                session().copy(
+                    messages =
+                        listOf(
+                            com.englishteacher.core.domain.model.ChatMessage(
+                                "m1",
+                                com.englishteacher.core.domain.model.Speaker.TUTOR,
+                                "Welcome!",
+                                1,
+                            ),
+                            com.englishteacher.core.domain.model.ChatMessage(
+                                "m2",
+                                com.englishteacher.core.domain.model.Speaker.USER,
+                                "Hello",
+                                2,
+                            ),
+                        ),
+                )
+
+            engine().respond(withHistory, "How are you?")
+
+            val body = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+            val messages = body["messages"]!!.jsonArray
+            val roles = messages.map { it.jsonObject["role"]!!.jsonPrimitive.content }
+            // system, assistant(Welcome), user(Hello), user(How are you?)
+            assertEquals(listOf("system", "assistant", "user", "user"), roles)
+            assertEquals("How are you?", messages.last().jsonObject["content"]!!.jsonPrimitive.content)
+        }
+
+    @Test
     fun `opener seeds a user message when history is empty`() =
         runTest {
             server.enqueue(
