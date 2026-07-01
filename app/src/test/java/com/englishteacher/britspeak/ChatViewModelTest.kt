@@ -13,6 +13,7 @@ import com.englishteacher.core.domain.model.ConversationSession
 import com.englishteacher.core.domain.model.Correction
 import com.englishteacher.core.domain.model.CorrectionType
 import com.englishteacher.core.domain.model.FeedbackLanguage
+import com.englishteacher.core.domain.model.TutorStreamEvent
 import com.englishteacher.core.domain.model.TutorTurn
 import com.englishteacher.core.domain.port.Clock
 import com.englishteacher.core.domain.port.IdGenerator
@@ -27,6 +28,8 @@ import com.englishteacher.core.usecase.StartSessionUseCase
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -89,6 +92,24 @@ class ChatViewModelTest {
     private fun engineReturning(turn: TutorTurn): TutorEngine =
         object : TutorEngine {
             override suspend fun respond(session: ConversationSession, userUtterance: String) = turn
+        }
+
+    /** [TutorEngine] that streams [deltas] as separate events before completing with [turn]. */
+    private fun streamingEngine(
+        deltas: List<String>,
+        turn: TutorTurn,
+    ): TutorEngine =
+        object : TutorEngine {
+            override suspend fun respond(session: ConversationSession, userUtterance: String) = turn
+
+            override fun streamRespond(
+                session: ConversationSession,
+                userUtterance: String,
+            ): Flow<TutorStreamEvent> =
+                flow {
+                    deltas.forEach { emit(TutorStreamEvent.ReplyDelta(it)) }
+                    emit(TutorStreamEvent.Done(turn))
+                }
         }
 
     private fun buildViewModel(
@@ -184,6 +205,29 @@ class ChatViewModelTest {
             val state = vm.state.value
             assertEquals("I went to the shop.", state.pendingRepeat)
             // opener + user + tutor
+            assertEquals(3, state.session?.messages?.size)
+            assertEquals(ChatPhase.IDLE, state.phase)
+        }
+
+    @Test
+    fun `a reply streamed across multiple deltas still ends idle with the final session`() =
+        runTest {
+            val turn =
+                TutorTurn(
+                    reply = "Lovely! Anything to drink?",
+                    corrections = emptyList(),
+                    repeatTarget = "Anything to drink?",
+                )
+            val vm =
+                buildViewModel(
+                    engine = streamingEngine(deltas = listOf("Lovely! ", "Anything to drink?"), turn = turn),
+                    stt = FakeStt("I'll have the soup"),
+                )
+            vm.startOnTopic("free_chat")
+            vm.startListening()
+
+            val state = vm.state.value
+            assertEquals("Anything to drink?", state.pendingRepeat)
             assertEquals(3, state.session?.messages?.size)
             assertEquals(ChatPhase.IDLE, state.phase)
         }

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.englishteacher.britspeak.data.CustomTopicHolder
 import com.englishteacher.britspeak.data.prefs.ApiKeyStore
 import com.englishteacher.britspeak.data.prefs.SettingsStore
+import com.englishteacher.britspeak.speech.FillerPhrases
 import com.englishteacher.britspeak.speech.SpeechToText
 import com.englishteacher.britspeak.speech.SttCallback
 import com.englishteacher.britspeak.speech.TutorVoice
@@ -17,7 +18,9 @@ import com.englishteacher.core.domain.port.LearnerPreferences
 import com.englishteacher.core.usecase.ContinueSessionUseCase
 import com.englishteacher.core.usecase.DailyTopicSelector
 import com.englishteacher.core.usecase.RepeatScorer
+import com.englishteacher.core.usecase.SendStreamEvent
 import com.englishteacher.core.usecase.SendUtteranceUseCase
+import com.englishteacher.core.usecase.SentenceChunker
 import com.englishteacher.core.usecase.StartSessionUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -233,28 +236,84 @@ class ChatViewModel
                 _state.update { it.copy(phase = ChatPhase.IDLE) }
                 return
             }
-            _state.update { it.copy(phase = ChatPhase.THINKING, isBusy = true) }
+            // Mask the network round-trip with an instant acknowledgement; the first real
+            // sentence is enqueued (QUEUE_ADD) right after it, so playback stays seamless.
+            voice.speak(FillerPhrases.random())
+            _state.update { it.copy(phase = ChatPhase.THINKING, isBusy = true, streamingReply = "") }
+
             viewModelScope.launch {
-                runCatching { sendUtterance(session, text) }
-                    .onSuccess { result ->
-                        _state.update {
-                            it.copy(
-                                session = result.session,
-                                pendingRepeat = result.turn.repeatTarget,
-                                isBusy = false,
-                            )
+                val chunker = SentenceChunker()
+                // Holds the most-recently-completed sentence back by one so the completion
+                // callback (which transitions phase back to IDLE) is attached only to the
+                // genuinely last utterance, never an interior one.
+                var heldSentence: String? = null
+                var speakingStarted = false
+
+                fun enqueueHeld(onSpoken: (() -> Unit)? = null) {
+                    val toSpeak = heldSentence ?: return
+                    heldSentence = null
+                    voice.enqueue(
+                        toSpeak,
+                        onStart = {
+                            if (!speakingStarted) {
+                                speakingStarted = true
+                                _state.update { it.copy(phase = ChatPhase.SPEAKING) }
+                            }
+                        },
+                        onDone = { onSpoken?.invoke() },
+                    )
+                }
+
+                runCatching {
+                    sendUtterance.streamInvoke(session, text).collect { event ->
+                        when (event) {
+                            is SendStreamEvent.ReplyDelta -> {
+                                _state.update { it.copy(streamingReply = it.streamingReply + event.text) }
+                                chunker.feed(event.text).forEach { sentence ->
+                                    enqueueHeld()
+                                    heldSentence = sentence
+                                }
+                            }
+                            is SendStreamEvent.Done -> {
+                                chunker.flush()?.let { trailing ->
+                                    heldSentence = listOfNotNull(heldSentence, trailing).joinToString(" ")
+                                }
+                                _state.update {
+                                    it.copy(
+                                        session = event.result.session,
+                                        pendingRepeat = event.result.turn.repeatTarget,
+                                        isBusy = false,
+                                    )
+                                }
+                                if (heldSentence == null) {
+                                    _state.update {
+                                        if (it.phase == ChatPhase.SPEAKING || it.phase == ChatPhase.THINKING) {
+                                            it.copy(phase = ChatPhase.IDLE)
+                                        } else {
+                                            it
+                                        }
+                                    }
+                                } else {
+                                    enqueueHeld(
+                                        onSpoken = {
+                                            _state.update {
+                                                if (it.phase == ChatPhase.SPEAKING) it.copy(phase = ChatPhase.IDLE) else it
+                                            }
+                                        },
+                                    )
+                                }
+                            }
                         }
-                        speak(result.turn.reply, andThen = ChatPhase.IDLE)
                     }
-                    .onFailure { error ->
-                        _state.update {
-                            it.copy(
-                                phase = ChatPhase.IDLE,
-                                isBusy = false,
-                                error = error.message ?: "Something went wrong. Please try again.",
-                            )
-                        }
+                }.onFailure { error ->
+                    _state.update {
+                        it.copy(
+                            phase = ChatPhase.IDLE,
+                            isBusy = false,
+                            error = error.message ?: "Something went wrong. Please try again.",
+                        )
                     }
+                }
             }
         }
 

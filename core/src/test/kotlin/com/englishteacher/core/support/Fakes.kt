@@ -1,11 +1,14 @@
 package com.englishteacher.core.support
 
 import com.englishteacher.core.domain.model.ConversationSession
+import com.englishteacher.core.domain.model.TutorStreamEvent
 import com.englishteacher.core.domain.model.TutorTurn
 import com.englishteacher.core.domain.port.Clock
 import com.englishteacher.core.domain.port.IdGenerator
 import com.englishteacher.core.domain.port.SessionRepository
 import com.englishteacher.core.domain.port.TutorEngine
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 
 /** Monotonic clock that advances by a fixed step on each read; deterministic for tests. */
 class FakeClock(
@@ -65,4 +68,27 @@ class FakeTutorEngine(
         lastUtterance = userUtterance
         return turn
     }
+}
+
+/**
+ * [TutorEngine] that streams [deltas] one at a time before completing with [turn] — used to
+ * exercise callers that consume [TutorEngine.streamRespond] incrementally.
+ */
+class FakeStreamingTutorEngine(
+    private val deltas: List<String>,
+    private val turn: TutorTurn,
+) : TutorEngine {
+    override suspend fun respond(
+        session: ConversationSession,
+        userUtterance: String,
+    ): TutorTurn = turn
+
+    override fun streamRespond(
+        session: ConversationSession,
+        userUtterance: String,
+    ): Flow<TutorStreamEvent> =
+        flow {
+            deltas.forEach { emit(TutorStreamEvent.ReplyDelta(it)) }
+            emit(TutorStreamEvent.Done(turn))
+        }
 }

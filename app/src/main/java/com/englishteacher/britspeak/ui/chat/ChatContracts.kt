@@ -38,6 +38,8 @@ data class ChatUiState(
     val sttLoading: Boolean = false,
     val isBusy: Boolean = false,
     val error: String? = null,
+    /** The tutor's reply as it streams in, live — shown in the subtitle before it's persisted. */
+    val streamingReply: String = "",
 ) {
     val avatarMood: AvatarMood get() = avatarMoodFor(phase)
     val canSpeak: Boolean get() = hasApiKey && phase != ChatPhase.THINKING && phase != ChatPhase.SPEAKING
@@ -47,7 +49,9 @@ data class ChatUiState(
         get() =
             when (phase) {
                 ChatPhase.SPEAKING ->
-                    session?.messages?.lastOrNull { it.speaker == Speaker.TUTOR }?.text.orEmpty()
+                    streamingReply.ifBlank {
+                        session?.messages?.lastOrNull { it.speaker == Speaker.TUTOR }?.text.orEmpty()
+                    }
                 ChatPhase.LISTENING, ChatPhase.REPEATING -> partialTranscript
                 else -> ""
             }

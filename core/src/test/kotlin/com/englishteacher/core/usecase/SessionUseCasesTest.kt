@@ -8,8 +8,10 @@ import com.englishteacher.core.domain.model.TutorTurn
 import com.englishteacher.core.domain.port.LearnerPreferences
 import com.englishteacher.core.support.FakeClock
 import com.englishteacher.core.support.FakeIdGenerator
+import com.englishteacher.core.support.FakeStreamingTutorEngine
 import com.englishteacher.core.support.FakeTutorEngine
 import com.englishteacher.core.support.InMemorySessionRepository
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -84,6 +86,30 @@ class SessionUseCasesTest {
             assertEquals("I work at a company.", tutor.repeatTarget)
             assertEquals("I work in a company", engine.lastUtterance)
             // Persisted.
+            assertEquals(3, repo.get(session.id)!!.messages.size)
+        }
+
+    @Test
+    fun `stream invoke forwards deltas then persists the same as a normal turn`() =
+        runTest {
+            val repo = InMemorySessionRepository()
+            val start = StartSessionUseCase(FakeClock(), FakeIdGenerator(), repo)
+            val session = start(TopicCatalog.freeChat, LearnerPreferences())
+
+            val turn = TutorTurn("Lovely! Anything to drink?", emptyList(), "Anything to drink?")
+            val engine = FakeStreamingTutorEngine(deltas = listOf("Lovely! ", "Anything to drink?"), turn = turn)
+            val send = SendUtteranceUseCase(engine, FakeClock(start = 500), FakeIdGenerator(), repo)
+
+            val events = send.streamInvoke(session, "I'll have the soup").toList()
+
+            val deltas = events.filterIsInstance<SendStreamEvent.ReplyDelta>()
+            assertEquals(listOf("Lovely! ", "Anything to drink?"), deltas.map { it.text })
+
+            val done = events.last() as SendStreamEvent.Done
+            assertEquals(3, done.result.session.messages.size)
+            assertEquals("Lovely! Anything to drink?", done.result.session.messages[2].text)
+            assertEquals("Anything to drink?", done.result.turn.repeatTarget)
+            // Persisted exactly once, at the end.
             assertEquals(3, repo.get(session.id)!!.messages.size)
         }
 

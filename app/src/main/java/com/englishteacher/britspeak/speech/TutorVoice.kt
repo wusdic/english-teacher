@@ -12,6 +12,17 @@ interface TutorVoice {
         onDone: () -> Unit = {},
     )
 
+    /**
+     * Same as [speak] but appends to whatever is currently queued instead of interrupting it —
+     * used to play a streamed reply's sentences back-to-back without cutting each other off.
+     * Defaults to [speak] for implementations that don't support queuing.
+     */
+    fun enqueue(
+        text: String,
+        onStart: () -> Unit = {},
+        onDone: () -> Unit = {},
+    ) = speak(text, onStart, onDone)
+
     fun stop()
 
     fun release()

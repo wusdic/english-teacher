@@ -31,6 +31,35 @@ class ConversationResponseParser(
             throw TutorEngineException("Tutor response had an empty reply")
         }
 
+        return buildTurn(reply, dto)
+    }
+
+    /**
+     * Combines a reply captured incrementally while streaming (see
+     * [StreamingReplyAccumulator]) with the JSON tail that followed the delimiter
+     * (corrections/hasErrors/repeatTarget). The tail degrades gracefully to "no corrections" if
+     * missing or malformed — the spoken reply already streamed successfully by the time this
+     * runs, so only a genuinely empty reply fails the turn.
+     */
+    fun finalizeStreamedTurn(
+        streamedReply: String,
+        jsonTail: String,
+    ): TutorTurn {
+        val reply = streamedReply.trim()
+        if (reply.isBlank()) {
+            throw TutorEngineException("Tutor response had an empty reply")
+        }
+        val dto =
+            tryDecode(jsonTail)
+                ?: extractJsonObject(jsonTail)?.let { tryDecode(it) }
+                ?: TutorTurnDto()
+        return buildTurn(reply, dto)
+    }
+
+    private fun buildTurn(
+        reply: String,
+        dto: TutorTurnDto,
+    ): TutorTurn {
         val corrections =
             dto.corrections
                 .filter { it.corrected.isNotBlank() }

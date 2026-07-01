@@ -159,4 +159,43 @@ class ConversationResponseParserTest {
         val text = "<think>Let me think about how to respond to this learner..."
         assertFailsWith<TutorEngineException> { parser.parse(text) }
     }
+
+    @Test
+    fun `finalizeStreamedTurn combines the streamed reply with the json tail`() {
+        val turn =
+            parser.finalizeStreamedTurn(
+                streamedReply = "Lovely, tell me more!",
+                jsonTail =
+                    """
+                    {"hasErrors":true,"corrections":[
+                      {"original":"I go there yesterday","corrected":"I went there yesterday",
+                       "type":"grammar","explanationEn":"Past tense.","explanationZh":"过去式。"}
+                    ],"repeatTarget":"I went there yesterday."}
+                    """.trimIndent(),
+            )
+
+        assertEquals("Lovely, tell me more!", turn.reply)
+        assertTrue(turn.hasErrors)
+        assertEquals("I went there yesterday", turn.corrections[0].corrected)
+        assertEquals("I went there yesterday.", turn.repeatTarget)
+    }
+
+    @Test
+    fun `finalizeStreamedTurn degrades gracefully when the json tail is missing or malformed`() {
+        val turn = parser.finalizeStreamedTurn(streamedReply = "All good, carry on!", jsonTail = "")
+        assertEquals("All good, carry on!", turn.reply)
+        assertTrue(turn.corrections.isEmpty())
+        assertNull(turn.repeatTarget)
+
+        val turn2 = parser.finalizeStreamedTurn(streamedReply = "Great!", jsonTail = "not json at all")
+        assertEquals("Great!", turn2.reply)
+        assertTrue(turn2.corrections.isEmpty())
+    }
+
+    @Test
+    fun `finalizeStreamedTurn rejects a genuinely empty streamed reply`() {
+        assertFailsWith<TutorEngineException> {
+            parser.finalizeStreamedTurn(streamedReply = "   ", jsonTail = """{"hasErrors":false}""")
+        }
+    }
 }

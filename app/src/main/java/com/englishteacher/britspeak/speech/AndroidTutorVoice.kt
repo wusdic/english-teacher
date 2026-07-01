@@ -71,6 +71,19 @@ class AndroidTutorVoice
             text: String,
             onStart: () -> Unit,
             onDone: () -> Unit,
+        ) = enqueueInternal(text, TextToSpeech.QUEUE_FLUSH, onStart, onDone)
+
+        override fun enqueue(
+            text: String,
+            onStart: () -> Unit,
+            onDone: () -> Unit,
+        ) = enqueueInternal(text, TextToSpeech.QUEUE_ADD, onStart, onDone)
+
+        private fun enqueueInternal(
+            text: String,
+            queueMode: Int,
+            onStart: () -> Unit,
+            onDone: () -> Unit,
         ) {
             if (text.isBlank()) {
                 onDone()
@@ -83,7 +96,7 @@ class AndroidTutorVoice
                 main.postDelayed({ callbacks.remove(id)?.second?.invoke() }, 300)
                 return
             }
-            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
+            tts.speak(text, queueMode, null, id)
         }
 
         override fun stop() {

@@ -3,10 +3,13 @@ package com.englishteacher.core.ai
 import com.englishteacher.core.domain.model.ConversationSession
 import com.englishteacher.core.domain.model.FeedbackLanguage
 import com.englishteacher.core.domain.model.ProficiencyLevel
+import com.englishteacher.core.domain.model.TutorStreamEvent
 import com.englishteacher.core.domain.port.TutorEngineException
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -217,5 +220,60 @@ class OpenAiTutorEngineTest {
             val body = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
             val system = body["messages"]!!.jsonArray.first().jsonObject["content"]!!.jsonPrimitive.content
             assertTrue(system.contains("spaceship bridge crew"))
+        }
+
+    private fun sseChunk(content: String): String =
+        """data: {"choices":[{"index":0,"delta":{"content":${
+            Json.encodeToString(String.serializer(), content)
+        }}}]}${"\n\n"}"""
+
+    private fun sseResponse(vararg dataLines: String): MockResponse =
+        MockResponse()
+            .setResponseCode(200)
+            .setHeader("content-type", "text/event-stream")
+            .setBody(dataLines.joinToString(separator = "") + "data: [DONE]\n\n")
+
+    @Test
+    fun `streamRespond emits reply deltas then a final Done with parsed corrections`() =
+        runTest {
+            server.enqueue(
+                sseResponse(
+                    sseChunk("Lovely choice! "),
+                    sseChunk("Anything to drink?"),
+                    sseChunk(StreamingReplyAccumulator.DELIMITER),
+                    sseChunk(
+                        """{"hasErrors":true,"corrections":[{"original":"I want soup",""" +
+                            """"corrected":"I'd like the soup, please","type":"naturalness",""" +
+                            """"explanationEn":"More polite.","explanationZh":"更礼貌。"}],""" +
+                            """"repeatTarget":"I'd like the soup, please."}""",
+                    ),
+                ),
+            )
+
+            val events = engine().streamRespond(session(), "I want soup").toList()
+
+            val deltas = events.filterIsInstance<TutorStreamEvent.ReplyDelta>()
+            assertEquals("Lovely choice! Anything to drink?", deltas.joinToString("") { it.text })
+
+            val done = events.last() as TutorStreamEvent.Done
+            assertEquals("Lovely choice! Anything to drink?", done.turn.reply)
+            assertTrue(done.turn.hasErrors)
+            assertEquals("I'd like the soup, please.", done.turn.repeatTarget)
+
+            val recorded = server.takeRequest()
+            val body = Json.parseToJsonElement(recorded.body.readUtf8()).jsonObject
+            assertEquals(true, body["stream"]!!.jsonPrimitive.boolean)
+            assertTrue(!body.containsKey("response_format"), "streaming requests must not set response_format")
+        }
+
+    @Test
+    fun `streamRespond degrades to the whole reply when the provider never streams the delimiter`() =
+        runTest {
+            server.enqueue(sseResponse(sseChunk("Just chatting, no JSON today.")))
+
+            val events = engine().streamRespond(session(), "hello").toList()
+            val done = events.last() as TutorStreamEvent.Done
+            assertEquals("Just chatting, no JSON today.", done.turn.reply)
+            assertTrue(done.turn.corrections.isEmpty())
         }
 }

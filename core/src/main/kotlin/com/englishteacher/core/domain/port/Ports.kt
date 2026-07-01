@@ -2,7 +2,10 @@ package com.englishteacher.core.domain.port
 
 import com.englishteacher.core.domain.model.ConversationSession
 import com.englishteacher.core.domain.model.ProficiencyLevel
+import com.englishteacher.core.domain.model.TutorStreamEvent
 import com.englishteacher.core.domain.model.TutorTurn
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 
 /** Supplies the current wall-clock time; injected so logic stays deterministic in tests. */
 fun interface Clock {
@@ -33,6 +36,27 @@ interface TutorEngine {
      */
     suspend fun opener(session: ConversationSession): TutorTurn =
         TutorTurn(reply = "Hello! Shall we begin?", corrections = emptyList(), repeatTarget = null)
+
+    /**
+     * Streams the tutor's next turn as it is generated, so a caller can start speaking the
+     * reply before the whole turn (corrections, repeat target, ...) has arrived. Emits zero or
+     * more [TutorStreamEvent.ReplyDelta]s followed by exactly one [TutorStreamEvent.Done].
+     *
+     * The default wraps the non-streaming [respond] as a single delta — engines that don't
+     * implement real token streaming still work correctly through a streaming caller, just
+     * without the latency benefit.
+     */
+    fun streamRespond(
+        session: ConversationSession,
+        userUtterance: String,
+    ): Flow<TutorStreamEvent> =
+        flow {
+            val turn = respond(session, userUtterance)
+            if (turn.reply.isNotBlank()) {
+                emit(TutorStreamEvent.ReplyDelta(turn.reply))
+            }
+            emit(TutorStreamEvent.Done(turn))
+        }
 }
 
 /** Raised by a [TutorEngine] when it cannot produce a usable response. */

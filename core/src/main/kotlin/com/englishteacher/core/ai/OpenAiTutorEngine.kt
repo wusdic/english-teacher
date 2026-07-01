@@ -5,11 +5,15 @@ import com.englishteacher.core.domain.model.ConversationSession
 import com.englishteacher.core.domain.model.Persona
 import com.englishteacher.core.domain.model.Speaker
 import com.englishteacher.core.domain.model.Topic
+import com.englishteacher.core.domain.model.TutorStreamEvent
 import com.englishteacher.core.domain.model.TutorTurn
 import com.englishteacher.core.domain.port.TutorEngine
 import com.englishteacher.core.domain.port.TutorEngineException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -58,8 +62,97 @@ class OpenAiTutorEngine(
         val topic = resolveTopic(session)
         val systemContent =
             promptBuilder.systemPrompt(session, topic) + "\n\n" + PromptBuilder.JSON_INSTRUCTION
+        val messages = buildMessages(session, userUtterance, systemContent)
 
-        val messages = buildList {
+        // Prefer JSON mode; some OpenAI-compatible endpoints (e.g. MiniMax) don't support
+        // `response_format`. If a JSON-mode attempt fails, retry once without it (the prompt still
+        // asks for JSON and the parser tolerates prose/fences) and remember to skip JSON mode on
+        // every subsequent turn, so replies stay fast.
+        if (!jsonModeSupported) {
+            return requestOnce(messages, jsonMode = false)
+        }
+        return try {
+            requestOnce(messages, jsonMode = true)
+        } catch (e: TutorEngineException) {
+            val turn = requestOnce(messages, jsonMode = false)
+            // Only reached when the no-JSON retry succeeded — JSON mode was the culprit.
+            jsonModeSupported = false
+            turn
+        }
+    }
+
+    /**
+     * Streams the reply as it is generated: the model is asked to speak first, plain text, then
+     * emit a delimiter and the corrections/repeat-target JSON (see [PromptBuilder.STREAM_JSON_INSTRUCTION]).
+     * No `response_format` is requested — streamed output isn't a single JSON object, so JSON
+     * mode doesn't apply here regardless of what [jsonModeSupported] learned for non-streaming calls.
+     */
+    override fun streamRespond(
+        session: ConversationSession,
+        userUtterance: String,
+    ): Flow<TutorStreamEvent> =
+        flow {
+            val topic = resolveTopic(session)
+            val systemContent =
+                promptBuilder.systemPrompt(session, topic) + "\n\n" + PromptBuilder.STREAM_JSON_INSTRUCTION
+            val messages = buildMessages(session, userUtterance, systemContent)
+
+            val request =
+                OpenAiRequest(
+                    model = config.model,
+                    messages = messages,
+                    maxTokens = config.maxTokens,
+                    responseFormat = null,
+                    stream = true,
+                )
+            val bodyJson = json.encodeToString(OpenAiRequest.serializer(), request)
+            val httpRequest =
+                Request.Builder()
+                    .url("${config.baseUrl.trimEnd('/')}/chat/completions")
+                    .addHeader("Authorization", "Bearer ${config.apiKey}")
+                    .addHeader("content-type", "application/json")
+                    .addHeader("accept", "text/event-stream")
+                    .post(bodyJson.toRequestBody(JSON_MEDIA_TYPE))
+                    .build()
+
+            val accumulator = StreamingReplyAccumulator()
+            try {
+                httpClient.newCall(httpRequest).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        val text = response.body?.string().orEmpty()
+                        throw TutorEngineException(
+                            "OpenAI API error ${response.code}: ${extractError(text)}",
+                        )
+                    }
+                    val source =
+                        response.body?.source()
+                            ?: throw TutorEngineException("OpenAI API returned no body")
+                    while (true) {
+                        val line = source.readUtf8Line() ?: break
+                        if (!line.startsWith("data:")) continue
+                        val payload = line.removePrefix("data:").trim()
+                        if (payload.isEmpty()) continue
+                        if (payload == "[DONE]") break
+                        val delta = parseChunkContent(payload)
+                        if (delta.isNullOrEmpty()) continue
+                        val confirmed = accumulator.feed(delta)
+                        if (confirmed.isNotEmpty()) emit(TutorStreamEvent.ReplyDelta(confirmed))
+                    }
+                }
+            } catch (e: IOException) {
+                throw TutorEngineException("Network error contacting OpenAI-compatible API", e)
+            }
+
+            val (reply, jsonTail) = accumulator.finishReplyAndJson()
+            emit(TutorStreamEvent.Done(parser.finalizeStreamedTurn(reply, jsonTail)))
+        }.flowOn(ioDispatcher)
+
+    private fun buildMessages(
+        session: ConversationSession,
+        userUtterance: String?,
+        systemContent: String,
+    ): List<OpenAiMessage> =
+        buildList {
             add(OpenAiMessage(role = "system", content = systemContent))
             session.messages.forEach { m ->
                 add(
@@ -78,22 +171,17 @@ class OpenAiTutorEngine(
             }
         }
 
-        // Prefer JSON mode; some OpenAI-compatible endpoints (e.g. MiniMax) don't support
-        // `response_format`. If a JSON-mode attempt fails, retry once without it (the prompt still
-        // asks for JSON and the parser tolerates prose/fences) and remember to skip JSON mode on
-        // every subsequent turn, so replies stay fast.
-        if (!jsonModeSupported) {
-            return requestOnce(messages, jsonMode = false)
+    private fun parseChunkContent(dataPayload: String): String? =
+        try {
+            envelopeJson
+                .decodeFromString(OpenAiStreamChunk.serializer(), dataPayload)
+                .choices
+                .firstOrNull()
+                ?.delta
+                ?.content
+        } catch (_: Throwable) {
+            null
         }
-        return try {
-            requestOnce(messages, jsonMode = true)
-        } catch (e: TutorEngineException) {
-            val turn = requestOnce(messages, jsonMode = false)
-            // Only reached when the no-JSON retry succeeded — JSON mode was the culprit.
-            jsonModeSupported = false
-            turn
-        }
-    }
 
     private suspend fun requestOnce(
         messages: List<OpenAiMessage>,
@@ -208,6 +296,7 @@ internal data class OpenAiRequest(
     val messages: List<OpenAiMessage>,
     @SerialName("max_tokens") val maxTokens: Int,
     @SerialName("response_format") val responseFormat: OpenAiResponseFormat? = null,
+    val stream: Boolean = false,
 )
 
 @Serializable
@@ -234,4 +323,20 @@ internal data class OpenAiErrorEnvelope(
 internal data class OpenAiErrorBody(
     val message: String? = null,
     val type: String? = null,
+)
+
+/** One `data: {...}` chunk of an OpenAI-compatible `stream: true` Chat Completions response. */
+@Serializable
+internal data class OpenAiStreamChunk(
+    val choices: List<OpenAiStreamChoice> = emptyList(),
+)
+
+@Serializable
+internal data class OpenAiStreamChoice(
+    val delta: OpenAiStreamDelta? = null,
+)
+
+@Serializable
+internal data class OpenAiStreamDelta(
+    val content: String? = null,
 )

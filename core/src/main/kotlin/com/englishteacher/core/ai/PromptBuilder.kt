@@ -127,6 +127,30 @@ class PromptBuilder(
             Use an empty array for "corrections" when there are no mistakes.
             """.trimIndent()
 
+        /**
+         * Variant of [JSON_INSTRUCTION] for streamed requests: the reply is spoken plain text so
+         * it can be read and voiced sentence-by-sentence as it arrives, with the structured
+         * corrections/repeat-target JSON appended afterward once the reply is complete.
+         */
+        val STREAM_JSON_INSTRUCTION: String =
+            """
+            Write your spoken British-English reply first, as plain text only — no markdown, no
+            JSON, no surrounding quotes. The moment your spoken reply is finished, output the
+            exact line
+            ${StreamingReplyAccumulator.DELIMITER}
+            on its own, then a single JSON object with exactly these keys:
+            {
+              "hasErrors": boolean — whether the learner's last message had mistakes,
+              "corrections": array of objects, each with keys
+                 "original" (string), "corrected" (string),
+                 "type" (one of "grammar","vocabulary","pronunciation","naturalness"),
+                 "explanationEn" (string), "explanationZh" (string, Simplified Chinese),
+              "repeatTarget": string — one short sentence for the learner to repeat aloud
+            }
+            Use an empty array for "corrections" when there are no mistakes. Never write the
+            delimiter or the JSON before, or in the middle of, your spoken reply.
+            """.trimIndent()
+
         /** JSON schema constraining the model's structured output. */
         val OUTPUT_SCHEMA: JsonObject =
             buildJsonObject {
