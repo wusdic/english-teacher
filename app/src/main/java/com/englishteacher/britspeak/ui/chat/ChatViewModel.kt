@@ -55,10 +55,12 @@ class ChatViewModel
         init {
             viewModelScope.launch {
                 val prefs = settingsStore.preferences.first()
+                val subtitles = settingsStore.subtitlesEnabled.first()
                 _state.update {
                     it.copy(
                         feedbackLanguage = prefs.feedbackLanguage,
                         hasApiKey = apiKeyStore.hasKey,
+                        subtitlesEnabled = subtitles,
                     )
                 }
             }
@@ -68,10 +70,21 @@ class ChatViewModel
         fun refresh() {
             viewModelScope.launch {
                 val prefs = settingsStore.preferences.first()
+                val subtitles = settingsStore.subtitlesEnabled.first()
                 _state.update {
-                    it.copy(hasApiKey = apiKeyStore.hasKey, feedbackLanguage = prefs.feedbackLanguage)
+                    it.copy(
+                        hasApiKey = apiKeyStore.hasKey,
+                        feedbackLanguage = prefs.feedbackLanguage,
+                        subtitlesEnabled = subtitles,
+                    )
                 }
             }
+        }
+
+        fun toggleSubtitles() {
+            val next = !_state.value.subtitlesEnabled
+            _state.update { it.copy(subtitlesEnabled = next) }
+            viewModelScope.launch { settingsStore.setSubtitlesEnabled(next) }
         }
 
         /** Resume the most recent conversation, or start today's topic if there is none. */

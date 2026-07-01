@@ -18,3 +18,6 @@ captures/
 *.keystore
 !debug.keystore
 secrets.properties
+
+# Bundled offline speech models (fetched at build time by scripts/fetch-models.sh)
+app/src/main/assets/vosk-model/

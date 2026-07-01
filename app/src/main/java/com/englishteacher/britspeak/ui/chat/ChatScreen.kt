@@ -19,6 +19,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.ClosedCaptionOff
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Translate
@@ -31,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -136,7 +139,7 @@ fun ChatScreen(
 
             if (!state.hasApiKey) {
                 Text(
-                    text = "Add your Anthropic API key in Settings to start chatting.",
+                    text = "Add your API key in Settings to start chatting.",
                     style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.error,
@@ -144,8 +147,26 @@ fun ChatScreen(
                 )
             }
 
+            // Optional bottom subtitles.
+            if (state.subtitlesEnabled && state.subtitle.isNotBlank()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.inverseSurface,
+                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        text = state.subtitle,
+                        style = MaterialTheme.typography.titleMedium,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                    )
+                }
+            }
+
             ControlBar(
                 state = state,
+                onToggleSubtitles = viewModel::toggleSubtitles,
                 onMic = {
                     if (micGranted) {
                         viewModel.startListening()
@@ -167,6 +188,7 @@ fun ChatScreen(
 @Composable
 private fun ControlBar(
     state: ChatUiState,
+    onToggleSubtitles: () -> Unit,
     onMic: () -> Unit,
     onStop: () -> Unit,
     onRepeat: () -> Unit,
@@ -177,8 +199,16 @@ private fun ControlBar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onToggleLanguage) {
-            Icon(Icons.Filled.Translate, contentDescription = "Toggle correction language")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onToggleLanguage) {
+                Icon(Icons.Filled.Translate, contentDescription = "Toggle correction language")
+            }
+            IconButton(onClick = onToggleSubtitles) {
+                Icon(
+                    if (state.subtitlesEnabled) Icons.Filled.ClosedCaption else Icons.Filled.ClosedCaptionOff,
+                    contentDescription = "Toggle subtitles",
+                )
+            }
         }
 
         Box(contentAlignment = Alignment.Center) {

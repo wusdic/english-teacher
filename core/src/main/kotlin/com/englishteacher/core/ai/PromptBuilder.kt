@@ -107,6 +107,26 @@ class PromptBuilder(
         }
 
     companion object {
+        /**
+         * Plain-language description of the required JSON shape, appended to the system prompt for
+         * providers (OpenAI-compatible) that use JSON mode rather than a separate schema object.
+         */
+        val JSON_INSTRUCTION: String =
+            """
+            You MUST respond with ONLY a single JSON object (no markdown, no code fences) with
+            exactly these keys:
+            {
+              "reply": string — your spoken British-English reply,
+              "hasErrors": boolean — whether the learner's last message had mistakes,
+              "corrections": array of objects, each with keys
+                 "original" (string), "corrected" (string),
+                 "type" (one of "grammar","vocabulary","pronunciation","naturalness"),
+                 "explanationEn" (string), "explanationZh" (string, Simplified Chinese),
+              "repeatTarget": string — one short sentence for the learner to repeat aloud
+            }
+            Use an empty array for "corrections" when there are no mistakes.
+            """.trimIndent()
+
         /** JSON schema constraining the model's structured output. */
         val OUTPUT_SCHEMA: JsonObject =
             buildJsonObject {

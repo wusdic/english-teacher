@@ -97,8 +97,10 @@ class ChatViewModelTest {
     ): ChatViewModel {
         val settings = mockk<SettingsStore>()
         every { settings.preferences } returns flowOf(LearnerPreferences())
+        every { settings.subtitlesEnabled } returns flowOf(true)
         coEvery { settings.setFeedbackLanguage(any()) } returns Unit
         coEvery { settings.setProficiency(any()) } returns Unit
+        coEvery { settings.setSubtitlesEnabled(any()) } returns Unit
         val apiKey = mockk<ApiKeyStore>()
         every { apiKey.hasKey } returns true
 

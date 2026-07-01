@@ -6,10 +6,10 @@ import com.englishteacher.britspeak.data.KeyedTutorEngine
 import com.englishteacher.britspeak.data.db.AppDatabase
 import com.englishteacher.britspeak.data.db.RoomSessionRepository
 import com.englishteacher.britspeak.data.db.SessionDao
-import com.englishteacher.britspeak.speech.AndroidSpeechToText
 import com.englishteacher.britspeak.speech.AndroidTutorVoice
 import com.englishteacher.britspeak.speech.SpeechToText
 import com.englishteacher.britspeak.speech.TutorVoice
+import com.englishteacher.britspeak.speech.VoskSpeechToText
 import com.englishteacher.core.catalog.TopicCatalog
 import com.englishteacher.core.domain.port.Clock
 import com.englishteacher.core.domain.port.IdGenerator
@@ -39,7 +39,7 @@ abstract class BindingsModule {
     abstract fun bindTutorVoice(impl: AndroidTutorVoice): TutorVoice
 
     @Binds
-    abstract fun bindSpeechToText(impl: AndroidSpeechToText): SpeechToText
+    abstract fun bindSpeechToText(impl: VoskSpeechToText): SpeechToText
 
     @Binds
     abstract fun bindSessionRepository(impl: RoomSessionRepository): SessionRepository

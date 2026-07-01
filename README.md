@@ -26,6 +26,9 @@ against 「咕噜口语」.
 | 🎭 **Topics & scenarios** | Restaurant, airport, job interview, doctor, IELTS… plus open free chat. |
 | 📅 **Daily topic** | A deterministic "topic of the day", or continue your last conversation. |
 | 🎧 **Speaking + listening** | Speech-to-text in, text-to-speech out, repeat-after-me drills. |
+| 🧠 **Any model** | Switch between the **Anthropic** format and any **OpenAI-compatible** endpoint (OpenAI, DeepSeek, Qwen, Kimi, a local server…) in Settings. |
+| 🔌 **Offline recognition** | Speech recognition runs **fully on-device (Vosk)** — the model is bundled in the APK, no network needed to recognise your speech. |
+| 💬 **Subtitles** | Optional bottom captions during the conversation (toggle any time). |
 
 ---
 
@@ -57,18 +60,23 @@ cd core
 ### Build the Android app
 ```bash
 # from the repo root
+bash scripts/fetch-models.sh          # one-time: download the offline Vosk model into assets
 ./gradlew :app:assembleDebug          # builds the APK (pulls in core via composite build)
 ./gradlew :app:testDebugUnitTest      # app JVM unit tests
 ```
+> `scripts/fetch-models.sh` downloads the ~40 MB offline speech-recognition model into
+> `app/src/main/assets/` (it is not committed to git). CI runs this automatically before the
+> build. Without it the app still runs, but offline recognition will be unavailable until the
+> model is present.
 Open the project in Android Studio and run the `app` configuration on a device/emulator with
 a microphone and Google TTS/Speech services.
 
-### Configure your API key
-The app uses your own Anthropic API key (stored **encrypted** on-device via
-`EncryptedSharedPreferences`): open **Settings → Anthropic API key** and paste a key
-(`sk-ant-…`). For a multi-user production deployment, point the engine's `baseUrl` at a
-backend proxy and drop the BYO-key flow — the `core` `AnthropicConfig.baseUrl` is already
-pluggable (see [docs/PLAN.md](docs/PLAN.md) §3).
+### Configure your model & API key
+Open **Settings** and pick a **Model provider** — *Anthropic* or *OpenAI-compatible* — then
+set the **Base URL** and **Model** (sensible defaults are filled in) and paste your **API key**
+(stored **encrypted** on-device via `EncryptedSharedPreferences`). This lets the app drive
+Claude, GPT-4o, DeepSeek, Qwen, Kimi, a local model, etc. For a multi-user production
+deployment, point the Base URL at your own backend proxy and drop the BYO-key flow.
 
 ---
 
@@ -88,8 +96,9 @@ pluggable (see [docs/PLAN.md](docs/PLAN.md) §3).
 
 ## Tech stack
 Kotlin · Coroutines · Jetpack Compose (Material 3) · Hilt · Room · DataStore ·
-kotlinx.serialization · OkHttp · Anthropic Messages API (structured outputs) ·
-Android `SpeechRecognizer` & `TextToSpeech`.
+kotlinx.serialization · OkHttp · Anthropic Messages API + OpenAI-compatible Chat Completions
+(structured / JSON output) · **Vosk** on-device offline speech recognition · Android
+`TextToSpeech` (en-GB).
 
 ## License
 Provided as a reference implementation for the English-tutor brief.
