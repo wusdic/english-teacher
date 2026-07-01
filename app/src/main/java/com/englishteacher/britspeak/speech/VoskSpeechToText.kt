@@ -39,6 +39,9 @@ class VoskSpeechToText
         private var speechService: SpeechService? = null
         private var callback: SttCallback? = null
 
+        private val utterance = UtteranceAccumulator()
+        private var silenceTimer: Runnable? = null
+
         init {
             ensureModel()
         }
@@ -84,6 +87,8 @@ class VoskSpeechToText
             main.post {
                 this.callback = callback
                 delivered = false
+                utterance.reset()
+                cancelSilenceTimer()
                 val readyModel = model
                 if (readyModel == null) {
                     ensureModel()
@@ -118,6 +123,7 @@ class VoskSpeechToText
 
         override fun release() {
             main.post {
+                cancelSilenceTimer()
                 stopServiceInternal()
                 callback = null
             }
@@ -134,34 +140,63 @@ class VoskSpeechToText
         private val listener =
             object : RecognitionListener {
                 override fun onPartialResult(hypothesis: String?) {
-                    textOf(hypothesis, "partial")?.let { if (it.isNotBlank()) callback?.onPartial(it) }
+                    val partial = textOf(hypothesis, "partial")
+                    if (!partial.isNullOrBlank()) {
+                        // Still speaking — hold off finalising and show the live combined text.
+                        cancelSilenceTimer()
+                        callback?.onPartial(utterance.combined(partial))
+                    }
                 }
 
                 override fun onResult(hypothesis: String?) {
-                    deliverOnce(textOf(hypothesis, "text"))
+                    // A pause closed a segment; keep it and wait briefly in case the learner
+                    // continues, rather than cutting the turn off after the first phrase.
+                    textOf(hypothesis, "text")?.let { utterance.append(it) }
+                    callback?.onPartial(utterance.combined())
+                    scheduleSilenceFinalize()
                 }
 
                 override fun onFinalResult(hypothesis: String?) {
-                    deliverOnce(textOf(hypothesis, "text"))
+                    textOf(hypothesis, "text")?.let { utterance.append(it) }
+                    cancelSilenceTimer()
+                    deliverOnce(utterance.combined())
                     callback?.onEndOfSpeech()
                 }
 
                 override fun onError(e: Exception?) {
+                    cancelSilenceTimer()
                     callback?.onError(e?.message ?: "语音识别错误")
                 }
 
                 override fun onTimeout() {
-                    if (!delivered) callback?.onEndOfSpeech()
+                    cancelSilenceTimer()
+                    if (!delivered) {
+                        deliverOnce(utterance.combined())
+                        callback?.onEndOfSpeech()
+                    }
                 }
             }
+
+        /** After a segment closes, finalise the turn if the learner stays silent for a moment. */
+        private fun scheduleSilenceFinalize() {
+            cancelSilenceTimer()
+            val r = Runnable { speechService?.stop() } // flushes → onFinalResult → deliverOnce
+            silenceTimer = r
+            main.postDelayed(r, SILENCE_FINALIZE_MS)
+        }
+
+        private fun cancelSilenceTimer() {
+            silenceTimer?.let { main.removeCallbacks(it) }
+            silenceTimer = null
+        }
 
         private fun deliverOnce(text: String?) {
             if (delivered) return
             if (text.isNullOrBlank()) return
             delivered = true
             callback?.onResult(text)
-            // One utterance per turn: stop after the first result.
-            speechService?.stop()
+            // One utterance per turn: release the recogniser once we've delivered the result.
+            stopServiceInternal()
         }
 
         private fun textOf(
@@ -173,5 +208,12 @@ class VoskSpeechToText
             private const val SAMPLE_RATE = 16000.0f
             private const val MODEL_ASSET = "vosk-model"
             private const val MODEL_TARGET = "vosk-model"
+
+            /**
+             * How long to wait after a segment closes before finalising the turn. Generous enough
+             * to let a learner pause to think mid-sentence without being cut off; the learner can
+             * always tap the stop button to submit immediately.
+             */
+            private const val SILENCE_FINALIZE_MS = 1800L
         }
     }
