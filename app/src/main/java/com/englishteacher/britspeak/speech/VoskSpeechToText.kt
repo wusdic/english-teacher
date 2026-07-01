@@ -34,6 +34,8 @@ class VoskSpeechToText
 
         @Volatile private var delivered = false
 
+        @Volatile private var lastError: String? = null
+
         private var speechService: SpeechService? = null
         private var callback: SttCallback? = null
 
@@ -44,24 +46,32 @@ class VoskSpeechToText
         override val isAvailable: Boolean
             get() = model != null
 
+        private fun modelAssetPresent(): Boolean =
+            runCatching { context.assets.list(MODEL_ASSET)?.isNotEmpty() == true }.getOrDefault(false)
+
         private fun ensureModel() {
             if (model != null || unpacking) return
-            val hasAsset =
-                runCatching { context.assets.list(MODEL_ASSET)?.isNotEmpty() == true }.getOrDefault(false)
-            if (!hasAsset) return
+            if (!modelAssetPresent()) return
             unpacking = true
-            StorageService.unpack(
-                context,
-                MODEL_ASSET,
-                MODEL_TARGET,
-                { m ->
-                    model = m
-                    unpacking = false
-                },
-                { _ ->
-                    unpacking = false
-                },
-            )
+            try {
+                StorageService.unpack(
+                    context,
+                    MODEL_ASSET,
+                    MODEL_TARGET,
+                    { m ->
+                        model = m
+                        lastError = null
+                        unpacking = false
+                    },
+                    { e ->
+                        lastError = e?.message ?: "unpack failed"
+                        unpacking = false
+                    },
+                )
+            } catch (t: Throwable) {
+                lastError = t.message ?: "unpack error"
+                unpacking = false
+            }
         }
 
         override fun startListening(
@@ -74,7 +84,16 @@ class VoskSpeechToText
                 val readyModel = model
                 if (readyModel == null) {
                     ensureModel()
-                    callback.onError("离线语音模型正在准备中，请稍候再试")
+                    val message =
+                        when {
+                            !modelAssetPresent() ->
+                                "未找到离线语音模型，请重新安装完整版 APK。"
+                            lastError != null ->
+                                "离线语音模型加载失败：$lastError。请重试。"
+                            else ->
+                                "离线语音模型正在加载，请等待几秒后重试。"
+                        }
+                    callback.onError(message)
                     return@post
                 }
                 try {

@@ -178,10 +178,8 @@ class ChatViewModel
         }
 
         private fun beginRecognition(phase: ChatPhase) {
-            if (!stt.isAvailable) {
-                _state.update { it.copy(error = "Speech recognition isn't available on this device.") }
-                return
-            }
+            // Don't hard-block on availability: the offline model may still be loading. Start
+            // listening and let the recogniser report a precise, retryable status via onError.
             _state.update { it.copy(phase = phase, partialTranscript = "", error = null) }
             stt.startListening(
                 localeTag = "en-GB",

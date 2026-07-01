@@ -56,8 +56,21 @@ jobs:
       - name: Fetch offline speech models
         run: bash scripts/fetch-models.sh
 
+      - name: Verify offline model is present before build
+        run: |
+          test -f app/src/main/assets/vosk-model/am/final.mdl
+          test -d app/src/main/assets/vosk-model/graph
+          echo "Model size:"; du -sh app/src/main/assets/vosk-model
+
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Verify offline model is packaged inside the APK
+        run: |
+          unzip -l app/build/outputs/apk/debug/app-debug.apk \
+            | grep -q "assets/vosk-model/am/final.mdl" \
+            && echo "✓ Vosk model is bundled in the APK" \
+            || (echo "✗ Vosk model missing from APK" && exit 1)
 
       - name: Run app JVM unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
