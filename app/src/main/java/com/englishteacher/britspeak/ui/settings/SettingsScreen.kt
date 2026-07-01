@@ -6,9 +6,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -116,6 +118,34 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
         }
         if (state.savedFlash) {
             Text("Saved.", color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp))
+        }
+
+        // --- Test connection ---
+        Row(
+            modifier = Modifier.padding(top = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Button(onClick = viewModel::testConnection, enabled = !state.testing) {
+                Text("测试连接")
+            }
+            if (state.testing) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                Text("测试中…", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        state.testMessage?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color =
+                    if (state.testSuccess == true) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                modifier = Modifier.padding(top = 6.dp),
+            )
         }
 
         // --- Subtitles ---

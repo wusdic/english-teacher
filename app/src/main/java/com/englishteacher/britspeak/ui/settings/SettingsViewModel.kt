@@ -4,7 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.englishteacher.britspeak.data.prefs.ApiKeyStore
 import com.englishteacher.britspeak.data.prefs.SettingsStore
+import com.englishteacher.core.ai.ConnectionTestResult
+import com.englishteacher.core.ai.ConnectionTester
 import com.englishteacher.core.ai.LlmProvider
+import com.englishteacher.core.ai.ProviderConfig
 import com.englishteacher.core.domain.model.FeedbackLanguage
 import com.englishteacher.core.domain.model.ProficiencyLevel
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,6 +28,9 @@ data class SettingsUiState(
     val proficiency: ProficiencyLevel = ProficiencyLevel.INTERMEDIATE,
     val subtitlesEnabled: Boolean = true,
     val savedFlash: Boolean = false,
+    val testing: Boolean = false,
+    val testSuccess: Boolean? = null,
+    val testMessage: String? = null,
 )
 
 @HiltViewModel
@@ -33,6 +39,7 @@ class SettingsViewModel
     constructor(
         private val settingsStore: SettingsStore,
         private val apiKeyStore: ApiKeyStore,
+        private val connectionTester: ConnectionTester,
     ) : ViewModel() {
         private val _state = MutableStateFlow(SettingsUiState(hasApiKey = apiKeyStore.hasKey))
         val state: StateFlow<SettingsUiState> = _state.asStateFlow()
@@ -99,6 +106,45 @@ class SettingsViewModel
         fun setSubtitlesEnabled(enabled: Boolean) {
             _state.update { it.copy(subtitlesEnabled = enabled) }
             viewModelScope.launch { settingsStore.setSubtitlesEnabled(enabled) }
+        }
+
+        /** Runs a live probe against the configured provider/model/key and reports the result. */
+        fun testConnection() {
+            val key = apiKeyStore.apiKey
+            if (key.isNullOrBlank()) {
+                _state.update {
+                    it.copy(testing = false, testSuccess = false, testMessage = "请先保存 API key")
+                }
+                return
+            }
+            val snapshot = _state.value
+            val config =
+                ProviderConfig(
+                    provider = snapshot.provider,
+                    apiKey = key,
+                    model = snapshot.model,
+                    baseUrl = snapshot.baseUrl,
+                )
+            _state.update { it.copy(testing = true, testSuccess = null, testMessage = null) }
+            viewModelScope.launch {
+                val result = connectionTester.test(config)
+                _state.update {
+                    when (result) {
+                        is ConnectionTestResult.Success ->
+                            it.copy(
+                                testing = false,
+                                testSuccess = true,
+                                testMessage = "连接正常 ✅ 模型回复：${result.sample}",
+                            )
+                        is ConnectionTestResult.Failure ->
+                            it.copy(
+                                testing = false,
+                                testSuccess = false,
+                                testMessage = "连接失败：${result.message}",
+                            )
+                    }
+                }
+            }
         }
 
         fun consumeSavedFlash() = _state.update { it.copy(savedFlash = false) }

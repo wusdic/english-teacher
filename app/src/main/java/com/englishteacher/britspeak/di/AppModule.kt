@@ -10,6 +10,7 @@ import com.englishteacher.britspeak.speech.AndroidTutorVoice
 import com.englishteacher.britspeak.speech.SpeechToText
 import com.englishteacher.britspeak.speech.TutorVoice
 import com.englishteacher.britspeak.speech.VoskSpeechToText
+import com.englishteacher.core.ai.ConnectionTester
 import com.englishteacher.core.catalog.TopicCatalog
 import com.englishteacher.core.domain.port.Clock
 import com.englishteacher.core.domain.port.IdGenerator
@@ -69,6 +70,11 @@ object AppModule {
         OkHttpClient.Builder()
             .callTimeout(Duration.ofSeconds(60))
             .build()
+
+    @Provides
+    @Singleton
+    fun provideConnectionTester(httpClient: OkHttpClient): ConnectionTester =
+        ConnectionTester(httpClient)
 
     @Provides
     @Singleton
