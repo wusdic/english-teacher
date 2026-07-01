@@ -3,13 +3,18 @@ package com.englishteacher.britspeak.ui.chat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -126,6 +131,7 @@ private fun TypeChip(type: CorrectionType) {
 fun RepeatScorePanel(
     score: RepeatScore,
     modifier: Modifier = Modifier,
+    onDismiss: (() -> Unit)? = null,
 ) {
     val color = if (score.passed) Color(0xFF1B7A3D) else Color(0xFFB26A00)
     Card(
@@ -133,31 +139,72 @@ fun RepeatScorePanel(
         colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.10f)),
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            Text(
-                text = if (score.passed) "Great pronunciation!  ${score.score}%" else "Keep practising  ${score.score}%",
-                style = MaterialTheme.typography.titleMedium,
-                color = color,
-            )
-            // Highlight which target words were matched vs missed.
             Row(
-                modifier = Modifier.padding(top = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                score.expectedTokens.forEachIndexed { index, token ->
-                    val matched = score.matchedExpected.getOrElse(index) { false }
+                Column(modifier = Modifier.weight(1f)) {
+                    // Make it unmistakably the跟读 (repeat-after-me) result, not a chat reply.
                     Text(
-                        text = token,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (matched) Color(0xFF1B7A3D) else Color(0xFFB00020),
-                        modifier =
-                            Modifier
-                                .background(
-                                    if (matched) Color(0xFF1B7A3D).copy(alpha = 0.10f) else Color(0xFFB00020).copy(alpha = 0.10f),
-                                    RoundedCornerShape(6.dp),
-                                )
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        text = "跟读练习 · Repeat practice",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = color,
+                    )
+                    Text(
+                        text =
+                            if (score.passed) {
+                                "读得很棒！  ${score.score}%"
+                            } else {
+                                "继续练习  ${score.score}%（红色是没读准的词）"
+                            },
+                        style = MaterialTheme.typography.titleMedium,
+                        color = color,
                     )
                 }
+                if (onDismiss != null) {
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Filled.Close, contentDescription = "关闭跟读评分", tint = color)
+                    }
+                }
+            }
+
+            if (score.expectedTokens.isNotEmpty()) {
+                Text(
+                    text = "要跟读的句子：",
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                // Highlight which target words were matched vs missed.
+                FlowRow(
+                    modifier = Modifier.padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    score.expectedTokens.forEachIndexed { index, token ->
+                        val matched = score.matchedExpected.getOrElse(index) { false }
+                        Text(
+                            text = token,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (matched) Color(0xFF1B7A3D) else Color(0xFFB00020),
+                            modifier =
+                                Modifier
+                                    .background(
+                                        if (matched) Color(0xFF1B7A3D).copy(alpha = 0.10f) else Color(0xFFB00020).copy(alpha = 0.10f),
+                                        RoundedCornerShape(6.dp),
+                                    )
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+            }
+
+            if (score.spokenTokens.isNotEmpty()) {
+                Text(
+                    text = "你说的：${score.spokenTokens.joinToString(" ")}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
             }
         }
     }

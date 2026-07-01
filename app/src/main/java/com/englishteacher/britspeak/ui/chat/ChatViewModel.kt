@@ -205,7 +205,9 @@ class ChatViewModel
         private fun beginRecognition(phase: ChatPhase) {
             // Don't hard-block on availability: the offline model may still be loading. Start
             // listening and let the recogniser report a precise, retryable status via onError.
-            _state.update { it.copy(phase = phase, partialTranscript = "", error = null) }
+            // Clear any previous repeat score so a stale "Keep practising 0%" panel can't linger
+            // under a new conversation turn (it is only meaningful for the attempt that produced it).
+            _state.update { it.copy(phase = phase, partialTranscript = "", error = null, lastRepeatScore = null) }
             stt.startListening(
                 localeTag = "en-GB",
                 callback =

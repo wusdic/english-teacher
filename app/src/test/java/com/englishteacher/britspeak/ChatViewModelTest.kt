@@ -33,6 +33,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -249,6 +251,29 @@ class ChatViewModelTest {
             assertEquals("Anything to drink?", state.pendingRepeat)
             assertEquals(3, state.session?.messages?.size)
             assertEquals(ChatPhase.IDLE, state.phase)
+        }
+
+    @Test
+    fun `starting a new turn clears a previous repeat score so it cannot linger`() =
+        runTest {
+            // Regression: a scored repeat used to stick under every later message because
+            // lastRepeatScore was never cleared, so a normal "hello" appeared to be answered with
+            // an old "Keep practising 0%" panel.
+            val turn = TutorTurn("Nice! Try: say this please.", emptyList(), "say this please")
+            val vm =
+                buildViewModel(
+                    engine = streamingEngine(deltas = listOf("Nice! Try: say this please."), turn = turn),
+                    stt = FakeStt("say this please"),
+                )
+            vm.startOnTopic("free_chat")
+            vm.startListening() // normal turn → tutor turn exposes a repeat target
+            assertEquals("say this please", vm.state.value.pendingRepeat)
+
+            vm.startRepeat() // produces a repeat score panel
+            assertNotNull(vm.state.value.lastRepeatScore)
+
+            vm.startListening() // a new normal turn must clear the stale score
+            assertNull(vm.state.value.lastRepeatScore)
         }
 
     @Test

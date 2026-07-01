@@ -163,7 +163,7 @@ fun ChatScreen(
                 state.lastRepeatScore?.let { score ->
                     item {
                         Box(modifier = Modifier.padding(12.dp)) {
-                            RepeatScorePanel(score = score)
+                            RepeatScorePanel(score = score, onDismiss = viewModel::dismissRepeatScore)
                         }
                     }
                 }
@@ -291,8 +291,16 @@ private fun ControlBar(
         }
 
         if (state.pendingRepeat != null) {
-            IconButton(onClick = onRepeat, enabled = state.canSpeak) {
-                Icon(Icons.Filled.RecordVoiceOver, contentDescription = "Repeat after Emma")
+            // Labelled so it is clearly the optional "repeat after me" drill, not the talk button.
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                IconButton(onClick = onRepeat, enabled = state.canSpeak) {
+                    Icon(Icons.Filled.RecordVoiceOver, contentDescription = "跟读练习")
+                }
+                Text(
+                    text = "跟读",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         } else {
             Spacer(Modifier.size(48.dp))
