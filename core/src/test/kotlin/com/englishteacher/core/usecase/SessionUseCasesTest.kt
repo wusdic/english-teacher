@@ -34,6 +34,18 @@ class SessionUseCasesTest {
         }
 
     @Test
+    fun `start session carries the topic's scenario prompt so it survives resuming later`() =
+        runTest {
+            val repo = InMemorySessionRepository()
+            val start = StartSessionUseCase(FakeClock(), FakeIdGenerator(), repo)
+            val topic = TopicCatalog.byId("restaurant")!!
+
+            val session = start(topic, LearnerPreferences())
+
+            assertEquals(topic.scenarioPrompt, session.customScenarioPrompt)
+        }
+
+    @Test
     fun `send utterance records both sides with corrections and repeat target`() =
         runTest {
             val repo = InMemorySessionRepository()

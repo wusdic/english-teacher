@@ -1,5 +1,6 @@
 package com.englishteacher.britspeak
 
+import com.englishteacher.britspeak.data.CustomTopicHolder
 import com.englishteacher.britspeak.data.prefs.ApiKeyStore
 import com.englishteacher.britspeak.data.prefs.SettingsStore
 import com.englishteacher.britspeak.speech.SpeechToText
@@ -116,6 +117,7 @@ class ChatViewModelTest {
             catalog = TopicCatalog,
             dailyTopicSelector = DailyTopicSelector(),
             clock = clock,
+            customTopicHolder = CustomTopicHolder(),
         )
     }
 
@@ -145,6 +147,16 @@ class ChatViewModelTest {
             assertEquals("At a Restaurant", vm.state.value.topicTitle)
             assertEquals(1, vm.state.value.session?.messages?.size)
             assertEquals(ChatPhase.IDLE, vm.state.value.phase)
+        }
+
+    @Test
+    fun `starting a custom topic id with no stashed topic falls back to free chat`() =
+        runTest {
+            // Defensive: if the user somehow lands on a custom topicId without going through the
+            // picker (e.g. process death), the app must not crash — it starts free chat instead.
+            val vm = buildViewModel()
+            vm.startOnTopic("custom_123")
+            assertEquals("Free Chat", vm.state.value.topicTitle)
         }
 
     @Test

@@ -15,7 +15,7 @@ class ConversationResponseParser(
 ) {
     /** Parses the JSON string the model produced in its (single) text block. */
     fun parse(structuredJson: String): TutorTurn {
-        val raw = structuredJson.trim()
+        val raw = stripThinkTags(structuredJson.trim())
 
         // Many OpenAI-compatible models (e.g. MiniMax) ignore "JSON only" and wrap the object in
         // prose or omit it entirely. Try the whole payload, then the first {...} substring, and
@@ -26,7 +26,8 @@ class ConversationResponseParser(
                 ?: extractJsonObject(raw)?.let { tryDecode(it) }
                 ?: return fallbackTurn(raw)
 
-        if (dto.reply.isBlank()) {
+        val reply = stripThinkTags(dto.reply).trim()
+        if (reply.isBlank()) {
             throw TutorEngineException("Tutor response had an empty reply")
         }
 
@@ -44,10 +45,23 @@ class ConversationResponseParser(
                 }
 
         return TutorTurn(
-            reply = dto.reply.trim(),
+            reply = reply,
             corrections = corrections,
             repeatTarget = dto.repeatTarget.trim().ifBlank { null },
         )
+    }
+
+    /**
+     * Reasoning models (DeepSeek-R1, QwQ, MiniMax's reasoning mode, ...) sometimes prefix their
+     * answer with a hidden chain-of-thought wrapped in `<think>`/`<thinking>`/`<reasoning>` tags.
+     * Strip it so the learner only ever sees the final answer, never the model's scratch-pad.
+     */
+    private fun stripThinkTags(text: String): String {
+        val closed = text.replace(THINK_TAG_REGEX, "")
+        // Defensive: a truncated response can leave an opening tag with no matching close (the
+        // model ran out of tokens mid-thought). Drop everything from that point on.
+        val openIdx = OPEN_TAG_REGEX.find(closed)?.range?.first
+        return (if (openIdx != null) closed.substring(0, openIdx) else closed).trim()
     }
 
     private fun tryDecode(candidate: String): TutorTurnDto? =
@@ -83,5 +97,12 @@ class ConversationResponseParser(
                 isLenient = true
                 coerceInputValues = true
             }
+
+        private val THINK_TAG_REGEX =
+            Regex(
+                "<(think|thinking|reasoning)>.*?</\\1>",
+                setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+            )
+        private val OPEN_TAG_REGEX = Regex("<(think|thinking|reasoning)>", RegexOption.IGNORE_CASE)
     }
 }

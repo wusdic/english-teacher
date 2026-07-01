@@ -55,7 +55,7 @@ class OpenAiTutorEngine(
         session: ConversationSession,
         userUtterance: String?,
     ): TutorTurn {
-        val topic = resolveTopic(session.topicId)
+        val topic = resolveTopic(session)
         val systemContent =
             promptBuilder.systemPrompt(session, topic) + "\n\n" + PromptBuilder.JSON_INSTRUCTION
 
@@ -149,8 +149,17 @@ class OpenAiTutorEngine(
         return parser.parse(content)
     }
 
-    private fun resolveTopic(topicId: String): Topic =
-        catalog.byId(topicId) ?: catalog.freeChat
+    /**
+     * Resolves the topic used to build the system prompt. A session's own
+     * [ConversationSession.customScenarioPrompt] (set for every session, including a
+     * user-authored custom scenario) always wins over the static catalog, so a scenario that
+     * isn't in [catalog] at all — or has since changed there — still renders correctly.
+     */
+    private fun resolveTopic(session: ConversationSession): Topic {
+        val base = catalog.byId(session.topicId) ?: catalog.freeChat
+        val custom = session.customScenarioPrompt?.trim()
+        return if (!custom.isNullOrBlank()) base.copy(scenarioPrompt = custom) else base
+    }
 
     private fun extractError(body: String): String =
         try {

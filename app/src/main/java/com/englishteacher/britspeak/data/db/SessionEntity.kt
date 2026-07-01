@@ -17,4 +17,5 @@ data class SessionEntity(
     val proficiency: String,
     val feedbackLanguage: String,
     val messagesJson: String,
+    val customScenarioPrompt: String? = null,
 )

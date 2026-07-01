@@ -127,4 +127,36 @@ class ConversationResponseParserTest {
     fun `empty content is rejected`() {
         assertFailsWith<TutorEngineException> { parser.parse("   ") }
     }
+
+    @Test
+    fun `think tags wrapping the whole payload are stripped`() {
+        // Reasoning models (DeepSeek-R1, QwQ, MiniMax reasoning mode, ...) may prefix the JSON
+        // with a hidden chain-of-thought. The learner must never see it.
+        val text =
+            """
+            <think>
+            The learner said "I go there yesterday", that's a tense error, I should correct it...
+            </think>
+            {"reply":"Lovely, tell me more!","hasErrors":true,"corrections":[],"repeatTarget":"I went there yesterday."}
+            """.trimIndent()
+
+        val turn = parser.parse(text)
+        assertEquals("Lovely, tell me more!", turn.reply)
+        assertEquals("I went there yesterday.", turn.repeatTarget)
+    }
+
+    @Test
+    fun `think tags inside the reply field are stripped`() {
+        val json =
+            """{"reply":"<thinking>hmm let me consider</thinking>Great job!","hasErrors":false,"corrections":[],"repeatTarget":"Great job."}"""
+        assertEquals("Great job!", parser.parse(json).reply)
+    }
+
+    @Test
+    fun `an unclosed think tag with no real answer is rejected`() {
+        // A truncated reasoning response (ran out of tokens mid-thought) has no usable answer at
+        // all — failing loudly here is correct so the caller can retry rather than speak nothing.
+        val text = "<think>Let me think about how to respond to this learner..."
+        assertFailsWith<TutorEngineException> { parser.parse(text) }
+    }
 }

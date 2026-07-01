@@ -60,4 +60,25 @@ class SessionMapperTest {
         assertEquals(FeedbackLanguage.ENGLISH, restored.feedbackLanguage)
         assertEquals(ProficiencyLevel.ADVANCED, restored.proficiency)
     }
+
+    @Test
+    fun `custom scenario prompt round-trips through the entity mapping`() {
+        val session =
+            ConversationSession(
+                id = "s2",
+                topicId = "custom",
+                title = "My Own Scenario",
+                createdAtMillis = 100,
+                updatedAtMillis = 100,
+                proficiency = ProficiencyLevel.BEGINNER,
+                feedbackLanguage = FeedbackLanguage.CHINESE,
+                messages = listOf(ChatMessage("m1", Speaker.TUTOR, "Hello!", 100)),
+                customScenarioPrompt = "You are a dragon guarding a library.",
+            )
+
+        val restored = SessionMappers.toDomain(SessionMappers.toEntity(session))
+
+        assertEquals(session, restored)
+        assertEquals("You are a dragon guarding a library.", restored.customScenarioPrompt)
+    }
 }

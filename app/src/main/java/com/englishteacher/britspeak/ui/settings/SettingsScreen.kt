@@ -84,6 +84,12 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             modifier = Modifier.padding(top = 4.dp),
         )
+        Text(
+            text = "回复较慢？可尝试该服务商更轻量/更快的对话模型（推理型模型通常更慢）。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            modifier = Modifier.padding(top = 2.dp),
+        )
 
         // --- API key ---
         Text(

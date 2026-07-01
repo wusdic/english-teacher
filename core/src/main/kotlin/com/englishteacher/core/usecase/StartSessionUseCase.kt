@@ -45,6 +45,7 @@ class StartSessionUseCase(
                 proficiency = preferences.proficiency,
                 feedbackLanguage = preferences.feedbackLanguage,
                 messages = listOf(firstMessage),
+                customScenarioPrompt = topic.scenarioPrompt,
             )
 
         repository.save(session)

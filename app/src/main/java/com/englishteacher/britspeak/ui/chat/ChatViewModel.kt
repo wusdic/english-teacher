@@ -2,6 +2,7 @@ package com.englishteacher.britspeak.ui.chat
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.englishteacher.britspeak.data.CustomTopicHolder
 import com.englishteacher.britspeak.data.prefs.ApiKeyStore
 import com.englishteacher.britspeak.data.prefs.SettingsStore
 import com.englishteacher.britspeak.speech.SpeechToText
@@ -47,6 +48,7 @@ class ChatViewModel
         private val catalog: TopicCatalog,
         private val dailyTopicSelector: DailyTopicSelector,
         private val clock: Clock,
+        private val customTopicHolder: CustomTopicHolder,
     ) : ViewModel() {
         private val _state = MutableStateFlow(ChatUiState())
         val state: StateFlow<ChatUiState> = _state.asStateFlow()
@@ -121,7 +123,14 @@ class ChatViewModel
         /** Start a fresh conversation on a chosen topic. */
         fun startOnTopic(topicId: String) {
             viewModelScope.launch {
-                val topic = catalog.byId(topicId) ?: catalog.freeChat
+                // A user-authored custom scenario is handed off in-memory by TopicViewModel
+                // rather than looked up in the static catalog.
+                val topic =
+                    if (topicId.startsWith(CustomTopicHolder.CUSTOM_TOPIC_ID)) {
+                        customTopicHolder.consume()
+                    } else {
+                        null
+                    } ?: catalog.byId(topicId) ?: catalog.freeChat
                 val prefs = currentPreferences()
                 val session = startSession(topic, prefs)
                 bind(session)

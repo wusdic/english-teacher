@@ -69,6 +69,7 @@ object SessionMappers {
             proficiency = session.proficiency.name,
             feedbackLanguage = session.feedbackLanguage.name,
             messagesJson = json.encodeToString(messageListSerializer, messages),
+            customScenarioPrompt = session.customScenarioPrompt,
         )
     }
 
@@ -102,6 +103,7 @@ object SessionMappers {
             proficiency = ProficiencyLevel.valueOf(entity.proficiency),
             feedbackLanguage = FeedbackLanguage.valueOf(entity.feedbackLanguage),
             messages = messages,
+            customScenarioPrompt = entity.customScenarioPrompt,
         )
     }
 }

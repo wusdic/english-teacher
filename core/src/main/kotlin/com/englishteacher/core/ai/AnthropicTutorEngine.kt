@@ -46,7 +46,7 @@ class AnthropicTutorEngine(
         session: ConversationSession,
         userUtterance: String?,
     ): TutorTurn {
-        val topic = resolveTopic(session.topicId)
+        val topic = resolveTopic(session)
         val request =
             WireRequest(
                 model = config.model,
@@ -103,8 +103,17 @@ class AnthropicTutorEngine(
         return parser.parse(structured)
     }
 
-    private fun resolveTopic(topicId: String): Topic =
-        catalog.byId(topicId) ?: catalog.freeChat
+    /**
+     * Resolves the topic used to build the system prompt. A session's own
+     * [ConversationSession.customScenarioPrompt] (set for every session, including a
+     * user-authored custom scenario) always wins over the static catalog, so a scenario that
+     * isn't in [catalog] at all — or has since changed there — still renders correctly.
+     */
+    private fun resolveTopic(session: ConversationSession): Topic {
+        val base = catalog.byId(session.topicId) ?: catalog.freeChat
+        val custom = session.customScenarioPrompt?.trim()
+        return if (!custom.isNullOrBlank()) base.copy(scenarioPrompt = custom) else base
+    }
 
     private fun extractError(body: String): String =
         try {

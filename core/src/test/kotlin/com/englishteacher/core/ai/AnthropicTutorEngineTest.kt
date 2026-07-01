@@ -152,4 +152,26 @@ class AnthropicTutorEngineTest {
             val firstMessage = body["messages"]!!.jsonArray.first().jsonObject
             assertEquals("user", firstMessage["role"]!!.jsonPrimitive.content)
         }
+
+    @Test
+    fun `a custom scenario prompt overrides the catalog topic in the system prompt`() =
+        runTest {
+            server.enqueue(
+                apiResponse(
+                    """{"reply":"Sure!","hasErrors":false,"corrections":[],"repeatTarget":"Sure!"}""",
+                ),
+            )
+            // topicId doesn't even need to exist in the catalog — the carried scenario wins.
+            val custom =
+                session().copy(
+                    topicId = "custom",
+                    customScenarioPrompt = "You run a spaceship bridge crew drill with the learner.",
+                )
+
+            engine().respond(custom, "Ready for launch")
+
+            val body = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+            val system = body["system"]!!.jsonPrimitive.content
+            assertTrue(system.contains("spaceship bridge crew"))
+        }
 }
