@@ -1,0 +1,23 @@
+# Gradle
+.gradle/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Android / IDE
+local.properties
+*.iml
+.idea/
+.kotlin/
+captures/
+.cxx/
+
+# OS
+.DS_Store
+
+# Secrets
+*.keystore
+!debug.keystore
+secrets.properties
+
+# Bundled offline speech models (fetched at build time by scripts/fetch-models.sh)
+app/src/main/assets/vosk-model/
