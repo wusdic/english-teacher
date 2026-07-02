@@ -79,15 +79,9 @@ class WhisperSpeechToText
             recording = true
             recordThread =
                 thread(name = "whisper-record") {
-                    val text = runCatching { captureAndTranscribe(callback) }.getOrNull()
+                    runCatching { runTurn(callback) }
+                        .onFailure { main.post { callback.onError("录音失败，请重试。") } }
                     recording = false
-                    if (text != null) {
-                        main.post {
-                            if (text.isBlank()) callback.onEndOfSpeech() else callback.onResult(text)
-                        }
-                    } else {
-                        main.post { callback.onError("录音失败，请重试。") }
-                    }
                 }
             main.post { callback.onReady() }
         }
@@ -104,8 +98,15 @@ class WhisperSpeechToText
             if (ptr != 0L) runCatching { WhisperLib.freeContext(ptr) }
         }
 
-        /** Records until a trailing silence (or [stopListening]/timeout), then runs whisper once. */
-        private fun captureAndTranscribe(callback: SttCallback): String {
+        /**
+         * One listening turn: record until a trailing silence (or [stopListening]/timeout), signal
+         * end-of-speech immediately (so the UI can react while whisper runs), transcribe, deliver.
+         *
+         * The endpointer is **noise-adaptive**: the speech threshold tracks a running noise floor
+         * (the quietest chunk heard so far) instead of a fixed constant, so background hum can't
+         * keep resetting the silence timer and make the app wait forever for the learner to stop.
+         */
+        private fun runTurn(callback: SttCallback) {
             val minBuf =
                 AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
             val bufSize = maxOf(minBuf, SAMPLE_RATE * 2)
@@ -119,7 +120,8 @@ class WhisperSpeechToText
                 )
             if (recorder.state != AudioRecord.STATE_INITIALIZED) {
                 recorder.release()
-                return ""
+                main.post { callback.onError("无法打开麦克风，请重试。") }
+                return
             }
 
             val samples = ArrayList<Float>(SAMPLE_RATE * 4)
@@ -127,7 +129,7 @@ class WhisperSpeechToText
             var speechStarted = false
             var silenceMs = 0
             var elapsedMs = 0
-            var notifiedProcessing = false
+            var noiseFloor = Double.MAX_VALUE
 
             recorder.startRecording()
             try {
@@ -143,7 +145,14 @@ class WhisperSpeechToText
                     val rms = sqrt(sumSq / n)
                     val chunkMs = n * 1000 / SAMPLE_RATE
                     elapsedMs += chunkMs
-                    if (rms > START_RMS) {
+
+                    // Track the quietest chunk heard so far as the noise floor; speech must rise
+                    // clearly above it. The base constant keeps very quiet rooms from being
+                    // over-sensitive to breathing.
+                    if (rms < noiseFloor) noiseFloor = rms
+                    val speechThreshold = maxOf(BASE_SPEECH_RMS, noiseFloor * NOISE_MULTIPLIER)
+
+                    if (rms > speechThreshold) {
                         speechStarted = true
                         silenceMs = 0
                     } else if (speechStarted) {
@@ -157,19 +166,32 @@ class WhisperSpeechToText
                 recorder.release()
             }
 
-            if (!speechStarted || samples.size < SAMPLE_RATE / 2) return "" // < 0.5s of speech
-
-            // Let the UI show a "recognising" hint while whisper runs (it isn't instant).
-            if (!notifiedProcessing) {
-                main.post { callback.onPartial("（识别中…）") }
-                notifiedProcessing = true
+            if (!speechStarted || samples.size < SAMPLE_RATE / 2) {
+                // Nothing usable was said — end the turn quietly rather than with an error.
+                main.post { callback.onResult("") }
+                return
             }
 
+            // Capture is over: tell the UI right away so it can play a filler / show "thinking"
+            // while whisper transcribes, instead of appearing stuck in listening.
+            main.post { callback.onEndOfSpeech() }
+
             val ptr = ctxPtr
-            if (ptr == 0L) return ""
-            val floats = FloatArray(samples.size) { samples[it] }
-            val threads = minOf(4, Runtime.getRuntime().availableProcessors())
-            return WhisperLib.transcribe(ptr, threads, floats).trim()
+            val text =
+                if (ptr == 0L) {
+                    ""
+                } else {
+                    val floats = FloatArray(samples.size) { samples[it] }
+                    val threads = minOf(6, Runtime.getRuntime().availableProcessors())
+                    WhisperLib.transcribe(ptr, threads, floats).trim()
+                }
+            main.post {
+                if (text.isBlank()) {
+                    callback.onError("没有听清楚，请再说一遍。")
+                } else {
+                    callback.onResult(text)
+                }
+            }
         }
 
         private fun ensureModelFile(): File? {
@@ -188,9 +210,14 @@ class WhisperSpeechToText
             const val MODEL_ASSET_DIR = "whisper-model"
             const val MODEL_FILE = "ggml-base.en-q5_1.bin"
 
-            /** RMS above this (on [-1,1] samples) counts as speech. Tune from real-device testing. */
-            const val START_RMS = 0.015
-            const val TRAILING_SILENCE_MS = 1200
+            /** Minimum RMS (on [-1,1] samples) that can ever count as speech, even in silence. */
+            const val BASE_SPEECH_RMS = 0.012
+
+            /** Speech must be this many times louder than the measured noise floor. */
+            const val NOISE_MULTIPLIER = 3.0
+
+            /** Trailing silence that ends the turn. Tap the stop button to end it immediately. */
+            const val TRAILING_SILENCE_MS = 900
             const val MAX_RECORD_MS = 15000
         }
     }

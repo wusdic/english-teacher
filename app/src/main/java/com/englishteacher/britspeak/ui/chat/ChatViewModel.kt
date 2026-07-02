@@ -66,6 +66,10 @@ class ChatViewModel
         // after the learner has already tapped stop; also enforces one result per listen.
         private var acceptingResults = false
 
+        // True when the filler acknowledgement was already spoken at end-of-capture (Whisper
+        // signals onEndOfSpeech before transcription), so submit() must not speak a second one.
+        private var fillerAlreadySpoken = false
+
         init {
             viewModelScope.launch {
                 val prefs = settingsStore.preferences.first()
@@ -271,6 +275,7 @@ class ChatViewModel
             // Clear any previous repeat score so a stale "Keep practising 0%" panel can't linger
             // under a new conversation turn (it is only meaningful for the attempt that produced it).
             acceptingResults = true
+            fillerAlreadySpoken = false
             _state.update { it.copy(phase = phase, partialTranscript = "", error = null, lastRepeatScore = null) }
             stt.startListening(
                 localeTag = "en-GB",
@@ -278,6 +283,16 @@ class ChatViewModel
                     object : SttCallback {
                         override fun onPartial(text: String) {
                             if (acceptingResults) _state.update { it.copy(partialTranscript = text) }
+                        }
+
+                        override fun onEndOfSpeech() {
+                            // Whisper signals this the moment capture ends, BEFORE transcription.
+                            // Acknowledge instantly and show "thinking" so the recognition delay
+                            // is masked by voice instead of an awkward silent wait.
+                            if (!acceptingResults || listeningForRepeat) return
+                            fillerAlreadySpoken = true
+                            voice.speak(FillerPhrases.random())
+                            _state.update { it.copy(phase = ChatPhase.THINKING, partialTranscript = "") }
                         }
 
                         override fun onResult(text: String) {
@@ -293,7 +308,12 @@ class ChatViewModel
 
                         override fun onError(message: String) {
                             acceptingResults = false
-                            _state.update { it.copy(phase = ChatPhase.IDLE, error = message) }
+                            // Also leave hands-free mode so the button state matches reality
+                            // (we are no longer listening and won't auto-restart into the error).
+                            conversationActive = false
+                            _state.update {
+                                it.copy(phase = ChatPhase.IDLE, conversationActive = false, error = message)
+                            }
                         }
                     },
             )
@@ -305,9 +325,11 @@ class ChatViewModel
                 _state.update { it.copy(phase = ChatPhase.IDLE) }
                 return
             }
-            // Mask the network round-trip with an instant acknowledgement; the first real
-            // sentence is enqueued (QUEUE_ADD) right after it, so playback stays seamless.
-            voice.speak(FillerPhrases.random())
+            // Mask the network round-trip with an instant acknowledgement — unless one was
+            // already spoken at end-of-capture (see onEndOfSpeech); the first real sentence is
+            // enqueued (QUEUE_ADD) right after it, so playback stays seamless.
+            if (!fillerAlreadySpoken) voice.speak(FillerPhrases.random())
+            fillerAlreadySpoken = false
             _state.update { it.copy(phase = ChatPhase.THINKING, isBusy = true, streamingReply = "") }
 
             viewModelScope.launch {

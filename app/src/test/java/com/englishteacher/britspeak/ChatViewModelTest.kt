@@ -105,6 +105,42 @@ class ChatViewModelTest {
         override fun release() {}
     }
 
+    /** Whisper-style STT: signals end-of-capture (onEndOfSpeech) BEFORE delivering the result. */
+    private class EndOfSpeechFirstStt(private val result: String) : SpeechToText {
+        override val isAvailable = true
+
+        override fun startListening(localeTag: String, callback: SttCallback) {
+            callback.onReady()
+            callback.onEndOfSpeech()
+            callback.onResult(result)
+        }
+
+        override fun stopListening() {}
+
+        override fun release() {}
+    }
+
+    /** Voice that records every spoken text so tests can assert on filler behaviour. */
+    private class RecordingVoice : TutorVoice {
+        val spoken = mutableListOf<String>()
+
+        override fun speak(text: String, onStart: () -> Unit, onDone: () -> Unit) {
+            spoken.add(text)
+            onStart()
+            onDone()
+        }
+
+        override fun enqueue(text: String, onStart: () -> Unit, onDone: () -> Unit) {
+            spoken.add(text)
+            onStart()
+            onDone()
+        }
+
+        override fun stop() {}
+
+        override fun release() {}
+    }
+
     /** STT that starts listening but never returns a result — for testing state toggles safely. */
     private class IdleStt : SpeechToText {
         override val isAvailable = true
@@ -378,5 +414,27 @@ class ChatViewModelTest {
             vm.startListening()
 
             assertEquals(ChatPhase.IDLE, vm.state.value.phase)
+        }
+
+    @Test
+    fun `whisper end-of-speech speaks exactly one filler and the turn still completes`() =
+        runTest {
+            // Whisper signals onEndOfSpeech before its (slow) transcription; the filler must play
+            // right then to mask the delay, and submit() must not add a second filler.
+            val voice = RecordingVoice()
+            val turn = TutorTurn("Nice to meet you!", emptyList(), null)
+            val vm =
+                buildViewModel(
+                    engine = streamingEngine(deltas = listOf("Nice to meet you!"), turn = turn),
+                    stt = EndOfSpeechFirstStt("hello what's your name"),
+                    voice = voice,
+                )
+            vm.startOnTopic("free_chat")
+            vm.startListening()
+
+            assertEquals(ChatPhase.IDLE, vm.state.value.phase)
+            assertEquals(3, vm.state.value.session?.messages?.size)
+            // opener + exactly one filler + the reply sentence — no double acknowledgement.
+            assertEquals(3, voice.spoken.size)
         }
 }
