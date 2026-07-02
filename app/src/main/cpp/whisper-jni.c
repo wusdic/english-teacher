@@ -57,6 +57,17 @@ Java_com_englishteacher_britspeak_speech_WhisperLib_transcribe(
     params.single_segment = false;
     params.suppress_blank = true;
 
+    // Big latency win for short utterances: whisper's encoder always processes a full 30 s
+    // window (1500 positions, 50/s). Shrinking audio_ctx to just cover the actual audio (plus a
+    // safety margin) makes encoding ~O(ctx^2) cheaper — several times faster for a few-second
+    // conversational turn, with negligible accuracy impact at this margin.
+    {
+        int audio_ctx = (int) ((double) n_samples / 16000.0 * 50.0) + 64;
+        if (audio_ctx < 192)  audio_ctx = 192;
+        if (audio_ctx > 1500) audio_ctx = 1500;
+        params.audio_ctx = audio_ctx;
+    }
+
     jstring result;
     int rc = whisper_full(ctx, params, (const float *) samples, (int) n_samples);
     (*env)->ReleaseFloatArrayElements(env, audio, samples, JNI_ABORT);

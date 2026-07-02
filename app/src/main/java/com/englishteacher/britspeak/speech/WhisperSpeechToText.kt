@@ -126,10 +126,8 @@ class WhisperSpeechToText
 
             val samples = ArrayList<Float>(SAMPLE_RATE * 4)
             val chunk = ShortArray(SAMPLE_RATE / 10) // 100 ms
-            var speechStarted = false
-            var silenceMs = 0
-            var elapsedMs = 0
-            var noiseFloor = Double.MAX_VALUE
+            // Noise-robust endpointing lives in EnergyEndpointer (pure + unit-tested).
+            val endpointer = EnergyEndpointer()
 
             recorder.startRecording()
             try {
@@ -144,29 +142,14 @@ class WhisperSpeechToText
                     }
                     val rms = sqrt(sumSq / n)
                     val chunkMs = n * 1000 / SAMPLE_RATE
-                    elapsedMs += chunkMs
-
-                    // Track the quietest chunk heard so far as the noise floor; speech must rise
-                    // clearly above it. The base constant keeps very quiet rooms from being
-                    // over-sensitive to breathing.
-                    if (rms < noiseFloor) noiseFloor = rms
-                    val speechThreshold = maxOf(BASE_SPEECH_RMS, noiseFloor * NOISE_MULTIPLIER)
-
-                    if (rms > speechThreshold) {
-                        speechStarted = true
-                        silenceMs = 0
-                    } else if (speechStarted) {
-                        silenceMs += chunkMs
-                        if (silenceMs >= TRAILING_SILENCE_MS) break
-                    }
-                    if (elapsedMs >= MAX_RECORD_MS) break
+                    if (endpointer.feed(rms, chunkMs) != EnergyEndpointer.Decision.CONTINUE) break
                 }
             } finally {
                 runCatching { recorder.stop() }
                 recorder.release()
             }
 
-            if (!speechStarted || samples.size < SAMPLE_RATE / 2) {
+            if (!endpointer.speechStarted || samples.size < SAMPLE_RATE / 2) {
                 // Nothing usable was said — end the turn quietly rather than with an error.
                 main.post { callback.onResult("") }
                 return
@@ -209,18 +192,5 @@ class WhisperSpeechToText
             const val SAMPLE_RATE = 16000
             const val MODEL_ASSET_DIR = "whisper-model"
             const val MODEL_FILE = "ggml-base.en-q5_1.bin"
-
-            /** Minimum RMS (on [-1,1] samples) that can ever count as speech, even in silence. */
-            const val BASE_SPEECH_RMS = 0.012
-
-            /** Speech must be this many times louder than the measured noise floor. */
-            const val NOISE_MULTIPLIER = 3.0
-
-            /**
-             * Trailing silence that ends the turn — as short as possible without clipping a brief
-             * mid-sentence breath. Tap the stop button to end the turn immediately.
-             */
-            const val TRAILING_SILENCE_MS = 600
-            const val MAX_RECORD_MS = 15000
         }
     }
