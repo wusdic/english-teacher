@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -44,8 +45,12 @@ class AndroidTutorVoice
                     ) {
                         tts.language = Locale.ENGLISH
                     }
-                    tts.setSpeechRate(0.95f)
-                    tts.setPitch(1.0f)
+                    // Explicitly select the most natural installed British voice — engines often
+                    // default to a flatter one even when a better en-GB voice is available.
+                    selectBestBritishVoice()
+                    // A touch slower than default with natural pitch reads as calm and human.
+                    tts.setSpeechRate(0.94f)
+                    tts.setPitch(0.98f)
                     // Speak anything requested during initialisation, in order.
                     queue.markReady().forEach { tts.speak(it.text, it.queueMode, null, it.id) }
                 } else {
@@ -133,6 +138,30 @@ class AndroidTutorVoice
         }
 
         private fun releaseBuffered(items: List<Pending>) = items.forEach { fireDone(it.id) }
+
+        /** Applies the best available British voice; leaves the engine default if none/erroring. */
+        private fun selectBestBritishVoice() {
+            runCatching {
+                val voices = tts.voices ?: return
+                val options =
+                    voices.mapNotNull { v ->
+                        val locale = v.locale ?: return@mapNotNull null
+                        if (v.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true) {
+                            return@mapNotNull null
+                        }
+                        BritishVoiceSelector.Option(
+                            name = v.name,
+                            language = locale.language,
+                            country = locale.country,
+                            quality = v.quality,
+                            needsNetwork = v.isNetworkConnectionRequired,
+                            isLatencyHigh = v.latency >= Voice.LATENCY_HIGH,
+                        )
+                    }
+                val chosen = BritishVoiceSelector.pick(options) ?: return
+                voices.firstOrNull { it.name == chosen }?.let { tts.voice = it }
+            }
+        }
 
         /** Posts [block] to the main thread (lambda literal so it SAM-converts to Runnable). */
         private fun postMain(block: () -> Unit) {
