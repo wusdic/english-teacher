@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.ClosedCaptionOff
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
@@ -75,7 +76,7 @@ fun ChatScreen(
     val permissionLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             micGranted = granted
-            if (granted) viewModel.startListening()
+            if (granted) viewModel.startConversation()
         }
 
     // Tap-the-avatar → pick a photo → save it locally → re-render as the animated character.
@@ -222,14 +223,14 @@ fun ChatScreen(
             ControlBar(
                 state = state,
                 onToggleSubtitles = viewModel::toggleSubtitles,
-                onMic = {
+                onStartConversation = {
                     if (micGranted) {
-                        viewModel.startListening()
+                        viewModel.startConversation()
                     } else {
                         permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 },
-                onStop = viewModel::stopListening,
+                onStopConversation = viewModel::stopConversation,
                 onRepeat = {
                     if (micGranted) viewModel.startRepeat() else permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 },
@@ -244,8 +245,8 @@ fun ChatScreen(
 private fun ControlBar(
     state: ChatUiState,
     onToggleSubtitles: () -> Unit,
-    onMic: () -> Unit,
-    onStop: () -> Unit,
+    onStartConversation: () -> Unit,
+    onStopConversation: () -> Unit,
     onRepeat: () -> Unit,
     onToggleLanguage: () -> Unit,
 ) {
@@ -266,27 +267,45 @@ private fun ControlBar(
             }
         }
 
-        Box(contentAlignment = Alignment.Center) {
-            when (state.phase) {
-                ChatPhase.THINKING -> CircularProgressIndicator(modifier = Modifier.size(64.dp))
-                ChatPhase.LISTENING, ChatPhase.REPEATING ->
-                    FilledIconButton(
-                        onClick = onStop,
-                        modifier = Modifier.size(72.dp),
-                        shape = CircleShape,
-                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.secondary),
-                    ) {
-                        Icon(Icons.Filled.Mic, contentDescription = "Listening — tap to stop", modifier = Modifier.size(34.dp))
-                    }
-                else ->
-                    FilledIconButton(
-                        onClick = onMic,
-                        enabled = state.canSpeak,
-                        modifier = Modifier.size(72.dp),
-                        shape = CircleShape,
-                    ) {
-                        Icon(Icons.Filled.Mic, contentDescription = "Tap to speak", modifier = Modifier.size(34.dp))
-                    }
+        // The mic is a single toggle: tap to start hands-free continuous conversation, tap again
+        // to stop. While active it stays a red "stop" button regardless of listen/think/speak.
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (state.conversationActive) {
+                FilledIconButton(
+                    onClick = onStopConversation,
+                    modifier = Modifier.size(72.dp),
+                    shape = CircleShape,
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.error),
+                ) {
+                    Icon(Icons.Filled.Stop, contentDescription = "停止对话", modifier = Modifier.size(34.dp))
+                }
+                Text(
+                    text =
+                        when (state.phase) {
+                            ChatPhase.LISTENING -> "聆听中… 点击停止"
+                            ChatPhase.THINKING -> "思考中…"
+                            ChatPhase.SPEAKING -> "回答中…"
+                            else -> "点击停止对话"
+                        },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            } else {
+                FilledIconButton(
+                    onClick = onStartConversation,
+                    enabled = state.canSpeak,
+                    modifier = Modifier.size(72.dp),
+                    shape = CircleShape,
+                ) {
+                    Icon(Icons.Filled.Mic, contentDescription = "开始连续对话", modifier = Modifier.size(34.dp))
+                }
+                Text(
+                    text = "点击开始对话",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
             }
         }
 

@@ -31,8 +31,10 @@ import io.mockk.mockk
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -103,6 +105,37 @@ class ChatViewModelTest {
         override fun release() {}
     }
 
+    /** STT that starts listening but never returns a result — for testing state toggles safely. */
+    private class IdleStt : SpeechToText {
+        override val isAvailable = true
+
+        override fun startListening(localeTag: String, callback: SttCallback) {
+            callback.onReady()
+        }
+
+        override fun stopListening() {}
+
+        override fun release() {}
+    }
+
+    /** STT that returns [result] only on the first listen, then stays idle (avoids a test loop). */
+    private class OneShotStt(private val result: String) : SpeechToText {
+        override val isAvailable = true
+        private var fired = false
+
+        override fun startListening(localeTag: String, callback: SttCallback) {
+            callback.onReady()
+            if (!fired) {
+                fired = true
+                callback.onResult(result)
+            }
+        }
+
+        override fun stopListening() {}
+
+        override fun release() {}
+    }
+
     private val clock = Clock { 1_000L }
     private val ids = object : IdGenerator {
         private var n = 0
@@ -137,6 +170,7 @@ class ChatViewModelTest {
         engine: TutorEngine = engineReturning(TutorTurn("Hi there!", emptyList(), null)),
         stt: SpeechToText = FakeStt("hello"),
         voice: TutorVoice = ImmediateVoice(),
+        hasApiKey: Boolean = true,
     ): ChatViewModel {
         val settings = mockk<SettingsStore>()
         every { settings.preferences } returns flowOf(LearnerPreferences())
@@ -145,7 +179,7 @@ class ChatViewModelTest {
         coEvery { settings.setProficiency(any()) } returns Unit
         coEvery { settings.setSubtitlesEnabled(any()) } returns Unit
         val apiKey = mockk<ApiKeyStore>()
-        every { apiKey.hasKey } returns true
+        every { apiKey.hasKey } returns hasApiKey
 
         return ChatViewModel(
             startSession = StartSessionUseCase(clock, ids, repo),
@@ -274,6 +308,58 @@ class ChatViewModelTest {
 
             vm.startListening() // a new normal turn must clear the stale score
             assertNull(vm.state.value.lastRepeatScore)
+        }
+
+    @Test
+    fun `start conversation turns on continuous mode and begins listening`() =
+        runTest {
+            val vm = buildViewModel(stt = IdleStt())
+            vm.startOnTopic("free_chat")
+
+            vm.startConversation()
+            assertTrue(vm.state.value.conversationActive)
+            assertEquals(ChatPhase.LISTENING, vm.state.value.phase)
+        }
+
+    @Test
+    fun `stop conversation turns off continuous mode and returns to idle`() =
+        runTest {
+            val vm = buildViewModel(stt = IdleStt())
+            vm.startOnTopic("free_chat")
+            vm.startConversation()
+
+            vm.stopConversation()
+            assertFalse(vm.state.value.conversationActive)
+            assertEquals(ChatPhase.IDLE, vm.state.value.phase)
+        }
+
+    @Test
+    fun `start conversation without an api key surfaces an error and stays off`() =
+        runTest {
+            val vm = buildViewModel(stt = IdleStt(), hasApiKey = false)
+            vm.startConversation()
+            assertFalse(vm.state.value.conversationActive)
+            assertNotNull(vm.state.value.error)
+        }
+
+    @Test
+    fun `continuous mode listens again after a tutor reply completes`() =
+        runTest {
+            // The heart of the feature: one spoken turn should record the exchange and then the
+            // app should be listening again automatically, still in continuous mode.
+            val vm =
+                buildViewModel(
+                    engine = streamingEngine(deltas = listOf("Nice to meet you!"), turn = TutorTurn("Nice to meet you!", emptyList(), null)),
+                    stt = OneShotStt("hello"),
+                )
+            vm.startOnTopic("free_chat")
+            vm.startConversation() // listens → OneShot returns "hello" → full turn runs
+            advanceUntilIdle() // let the post-reply re-listen delay elapse
+
+            assertTrue(vm.state.value.conversationActive)
+            assertEquals(ChatPhase.LISTENING, vm.state.value.phase)
+            // opener + user(hello) + tutor(reply)
+            assertEquals(3, vm.state.value.session?.messages?.size)
         }
 
     @Test

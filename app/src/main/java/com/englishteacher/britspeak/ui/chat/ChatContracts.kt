@@ -40,6 +40,8 @@ data class ChatUiState(
     val error: String? = null,
     /** The tutor's reply as it streams in, live — shown in the subtitle before it's persisted. */
     val streamingReply: String = "",
+    /** True while hands-free continuous conversation is on (mic toggled to keep listening). */
+    val conversationActive: Boolean = false,
 ) {
     val avatarMood: AvatarMood get() = avatarMoodFor(phase)
     val canSpeak: Boolean get() = hasApiKey && phase != ChatPhase.THINKING && phase != ChatPhase.SPEAKING

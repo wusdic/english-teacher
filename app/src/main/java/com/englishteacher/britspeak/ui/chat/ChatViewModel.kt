@@ -58,6 +58,14 @@ class ChatViewModel
 
         private var listeningForRepeat = false
 
+        // Continuous "hands-free" conversation: once on, the app keeps listening again after each
+        // tutor reply until the learner taps the button a second time to stop.
+        private var conversationActive = false
+
+        // Guards against a late recogniser result (Vosk flushes one when stopped) being submitted
+        // after the learner has already tapped stop; also enforces one result per listen.
+        private var acceptingResults = false
+
         init {
             viewModelScope.launch {
                 val prefs = settingsStore.preferences.first()
@@ -148,6 +156,38 @@ class ChatViewModel
             }
         }
 
+        /**
+         * Enter hands-free continuous conversation: start listening now, and keep listening again
+         * after every tutor reply until [stopConversation] is called. Safe to call repeatedly.
+         */
+        fun startConversation() {
+            if (conversationActive) return
+            if (!_state.value.hasApiKey) {
+                _state.update { it.copy(error = "请先在设置里配置大模型 API Key。") }
+                return
+            }
+            conversationActive = true
+            _state.update { it.copy(conversationActive = true) }
+            // If the tutor is mid-speech (e.g. the opener), don't interrupt — we'll auto-listen
+            // when it finishes via continueOrIdle().
+            if (_state.value.canSpeak) startListening()
+        }
+
+        /** Stop continuous conversation: stop listening now (the current reply still finishes). */
+        fun stopConversation() {
+            conversationActive = false
+            acceptingResults = false // ignore any final result the recogniser flushes on stop
+            _state.update { it.copy(conversationActive = false) }
+            stt.stopListening()
+            _state.update {
+                if (it.phase == ChatPhase.LISTENING || it.phase == ChatPhase.REPEATING) {
+                    it.copy(phase = ChatPhase.IDLE)
+                } else {
+                    it
+                }
+            }
+        }
+
         /** Begin capturing the learner's speech for a normal turn. */
         fun startListening() {
             if (!_state.value.canSpeak) return
@@ -164,6 +204,29 @@ class ChatViewModel
 
         fun stopListening() {
             stt.stopListening()
+        }
+
+        /** After a turn ends: settle to IDLE and, in continuous mode, listen again shortly. */
+        private fun continueOrIdle() {
+            _state.update {
+                if (it.phase == ChatPhase.SPEAKING || it.phase == ChatPhase.THINKING) {
+                    it.copy(phase = ChatPhase.IDLE)
+                } else {
+                    it
+                }
+            }
+            maybeContinueListening()
+        }
+
+        /** In continuous mode, resume listening after a short beat once we're idle. */
+        private fun maybeContinueListening() {
+            if (!conversationActive) return
+            viewModelScope.launch {
+                delay(CONTINUOUS_RELISTEN_DELAY_MS)
+                if (conversationActive && _state.value.phase == ChatPhase.IDLE && _state.value.canSpeak) {
+                    startListening()
+                }
+            }
         }
 
         /** Replay a tutor message via TTS. */
@@ -207,16 +270,19 @@ class ChatViewModel
             // listening and let the recogniser report a precise, retryable status via onError.
             // Clear any previous repeat score so a stale "Keep practising 0%" panel can't linger
             // under a new conversation turn (it is only meaningful for the attempt that produced it).
+            acceptingResults = true
             _state.update { it.copy(phase = phase, partialTranscript = "", error = null, lastRepeatScore = null) }
             stt.startListening(
                 localeTag = "en-GB",
                 callback =
                     object : SttCallback {
                         override fun onPartial(text: String) {
-                            _state.update { it.copy(partialTranscript = text) }
+                            if (acceptingResults) _state.update { it.copy(partialTranscript = text) }
                         }
 
                         override fun onResult(text: String) {
+                            if (!acceptingResults) return
+                            acceptingResults = false
                             _state.update { it.copy(partialTranscript = "") }
                             if (listeningForRepeat) {
                                 scoreRepeat(text)
@@ -226,6 +292,7 @@ class ChatViewModel
                         }
 
                         override fun onError(message: String) {
+                            acceptingResults = false
                             _state.update { it.copy(phase = ChatPhase.IDLE, error = message) }
                         }
                     },
@@ -250,19 +317,6 @@ class ChatViewModel
                 // genuinely last utterance, never an interior one.
                 var heldSentence: String? = null
                 var speakingStarted = false
-
-                // Return to IDLE from either SPEAKING (audio finished) or THINKING (e.g. the TTS
-                // engine wasn't ready, so onStart never fired and we never reached SPEAKING) — but
-                // never clobber a phase the learner has since moved on to (LISTENING/REPEATING).
-                fun settleToIdle() {
-                    _state.update {
-                        if (it.phase == ChatPhase.SPEAKING || it.phase == ChatPhase.THINKING) {
-                            it.copy(phase = ChatPhase.IDLE)
-                        } else {
-                            it
-                        }
-                    }
-                }
 
                 fun enqueueHeld(onSpoken: (() -> Unit)? = null) {
                     val toSpeak = heldSentence ?: return
@@ -301,18 +355,21 @@ class ChatViewModel
                                     )
                                 }
                                 if (heldSentence == null) {
-                                    settleToIdle()
+                                    continueOrIdle()
                                 } else {
-                                    enqueueHeld(onSpoken = { settleToIdle() })
+                                    enqueueHeld(onSpoken = { continueOrIdle() })
                                 }
                             }
                         }
                     }
                 }.onFailure { error ->
+                    // Stop the hands-free loop on failure so we don't retry into the same error.
+                    conversationActive = false
                     _state.update {
                         it.copy(
                             phase = ChatPhase.IDLE,
                             isBusy = false,
+                            conversationActive = false,
                             error = error.message ?: "Something went wrong. Please try again.",
                         )
                     }
@@ -324,6 +381,7 @@ class ChatViewModel
             val target = _state.value.pendingRepeat ?: return
             val score = repeatScorer.score(target, text)
             _state.update { it.copy(phase = ChatPhase.IDLE, lastRepeatScore = score) }
+            maybeContinueListening()
         }
 
         private fun speak(
@@ -333,7 +391,15 @@ class ChatViewModel
             _state.update { it.copy(phase = ChatPhase.SPEAKING) }
             voice.speak(
                 text = text,
-                onDone = { _state.update { if (it.phase == ChatPhase.SPEAKING) it.copy(phase = andThen) else it } },
+                onDone = {
+                    if (andThen == ChatPhase.IDLE) {
+                        // Route opener/replay completion through the same path so continuous mode
+                        // also auto-listens once the tutor stops speaking.
+                        continueOrIdle()
+                    } else {
+                        _state.update { if (it.phase == ChatPhase.SPEAKING) it.copy(phase = andThen) else it }
+                    }
+                },
             )
         }
 
@@ -344,5 +410,10 @@ class ChatViewModel
             stt.release()
             voice.release()
             super.onCleared()
+        }
+
+        private companion object {
+            /** Small beat after the tutor stops speaking before listening again in continuous mode. */
+            const val CONTINUOUS_RELISTEN_DELAY_MS = 350L
         }
     }
