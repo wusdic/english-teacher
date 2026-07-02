@@ -141,6 +141,22 @@ class ChatViewModelTest {
         override fun release() {}
     }
 
+    /** STT whose first listen ends with a blank result (no speech); later listens stay open. */
+    private class BlankFirstStt : SpeechToText {
+        override val isAvailable = true
+        var listens = 0
+
+        override fun startListening(localeTag: String, callback: SttCallback) {
+            listens++
+            callback.onReady()
+            if (listens == 1) callback.onResult("")
+        }
+
+        override fun stopListening() {}
+
+        override fun release() {}
+    }
+
     /** STT that starts listening but never returns a result — for testing state toggles safely. */
     private class IdleStt : SpeechToText {
         override val isAvailable = true
@@ -414,6 +430,23 @@ class ChatViewModelTest {
             vm.startListening()
 
             assertEquals(ChatPhase.IDLE, vm.state.value.phase)
+        }
+
+    @Test
+    fun `a silent capture window in continuous mode listens again instead of going dead`() =
+        runTest {
+            // Regression: when the 15 s capture window elapsed with no speech, the turn ended with
+            // a blank result and hands-free mode never restarted listening — the red button kept
+            // saying "listening" while the recogniser was actually dead.
+            val stt = BlankFirstStt()
+            val vm = buildViewModel(stt = stt)
+            vm.startOnTopic("free_chat")
+            vm.startConversation() // first listen immediately ends blank (nothing said)
+            advanceUntilIdle() // re-listen delay elapses
+
+            assertTrue(vm.state.value.conversationActive)
+            assertEquals(ChatPhase.LISTENING, vm.state.value.phase)
+            assertEquals(2, stt.listens) // a fresh listen actually started
         }
 
     @Test

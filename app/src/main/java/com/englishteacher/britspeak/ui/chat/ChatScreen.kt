@@ -19,12 +19,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ClosedCaption
-import androidx.compose.material.icons.filled.ClosedCaptionOff
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -222,7 +219,6 @@ fun ChatScreen(
 
             ControlBar(
                 state = state,
-                onToggleSubtitles = viewModel::toggleSubtitles,
                 onStartConversation = {
                     if (micGranted) {
                         viewModel.startConversation()
@@ -234,7 +230,6 @@ fun ChatScreen(
                 onRepeat = {
                     if (micGranted) viewModel.startRepeat() else permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 },
-                onToggleLanguage = viewModel::toggleFeedbackLanguage,
             )
             Spacer(Modifier.height(12.dp))
         }
@@ -244,28 +239,19 @@ fun ChatScreen(
 @Composable
 private fun ControlBar(
     state: ChatUiState,
-    onToggleSubtitles: () -> Unit,
     onStartConversation: () -> Unit,
     onStopConversation: () -> Unit,
     onRepeat: () -> Unit,
-    onToggleLanguage: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onToggleLanguage) {
-                Icon(Icons.Filled.Translate, contentDescription = "Toggle correction language")
-            }
-            IconButton(onClick = onToggleSubtitles) {
-                Icon(
-                    if (state.subtitlesEnabled) Icons.Filled.ClosedCaption else Icons.Filled.ClosedCaptionOff,
-                    contentDescription = "Toggle subtitles",
-                )
-            }
-        }
+        // Correction-language and subtitle toggles live in Settings — the bar stays clear of
+        // anything that could be mistaken for (or crowd) the talk button. This spacer balances
+        // the repeat button so the mic stays visually centred.
+        Spacer(Modifier.size(48.dp))
 
         // The mic is a single toggle: tap to start hands-free continuous conversation, tap again
         // to stop. While active it stays a red "stop" button regardless of listen/think/speak.

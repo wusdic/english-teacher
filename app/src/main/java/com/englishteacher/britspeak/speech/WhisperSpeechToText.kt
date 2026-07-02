@@ -216,8 +216,11 @@ class WhisperSpeechToText
             /** Speech must be this many times louder than the measured noise floor. */
             const val NOISE_MULTIPLIER = 3.0
 
-            /** Trailing silence that ends the turn. Tap the stop button to end it immediately. */
-            const val TRAILING_SILENCE_MS = 900
+            /**
+             * Trailing silence that ends the turn — as short as possible without clipping a brief
+             * mid-sentence breath. Tap the stop button to end the turn immediately.
+             */
+            const val TRAILING_SILENCE_MS = 600
             const val MAX_RECORD_MS = 15000
         }
     }

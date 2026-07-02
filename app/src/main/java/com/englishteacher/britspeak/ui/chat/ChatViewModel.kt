@@ -322,7 +322,11 @@ class ChatViewModel
         private fun submit(text: String) {
             val session = _state.value.session ?: return
             if (text.isBlank()) {
+                // Nothing was said before the capture window ended. In hands-free mode, start a
+                // fresh listen right away — otherwise the red button would claim to be listening
+                // while the recogniser is actually dead until the next tap.
                 _state.update { it.copy(phase = ChatPhase.IDLE) }
+                maybeContinueListening()
                 return
             }
             // Mask the network round-trip with an instant acknowledgement — unless one was
