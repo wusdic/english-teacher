@@ -207,7 +207,12 @@ class VoskSpeechToText
         companion object {
             private const val SAMPLE_RATE = 16000.0f
             private const val MODEL_ASSET = "vosk-model"
-            private const val MODEL_TARGET = "vosk-model"
+
+            // Version-stamped unpack directory: on an in-place app update, StorageService only
+            // re-copies when the target differs, so bumping this name guarantees the new (larger,
+            // more accurate) model is unpacked fresh instead of silently reusing a previously
+            // unpacked older model. Bump the suffix whenever the bundled model changes.
+            private const val MODEL_TARGET = "vosk-model-en-us-0.22-lgraph"
 
             /**
              * How long to wait after a segment closes before finalising the turn. Generous enough
