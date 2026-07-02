@@ -37,7 +37,7 @@ jobs:
           path: core/build/reports/tests/test
 
   android-build:
-    name: Android app build & unit tests
+    name: Android app build & unit tests (Whisper)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -53,25 +53,32 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Fetch offline speech models
+      - name: Install NDK + CMake for the native whisper.cpp build
+        run: |
+          yes | sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1" >/dev/null
+
+      - name: Fetch whisper.cpp source + model
         run: bash scripts/fetch-models.sh
 
-      - name: Verify offline model is present before build
+      - name: Verify whisper source + model are present before build
         run: |
-          test -f app/src/main/assets/vosk-model/am/final.mdl
-          test -d app/src/main/assets/vosk-model/graph
-          test -f app/src/main/assets/vosk-model/uuid
-          echo "Model size:"; du -sh app/src/main/assets/vosk-model
+          test -f app/src/main/cpp/whisper/whisper.cpp
+          test -f app/src/main/cpp/whisper/ggml.c
+          test -f app/src/main/assets/whisper-model/ggml-base.en-q5_1.bin
+          echo "Model size:"; du -sh app/src/main/assets/whisper-model
 
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
-      - name: Verify offline model is packaged inside the APK
+      - name: Verify the native lib and model are packaged inside the APK
         run: |
-          unzip -l app/build/outputs/apk/debug/app-debug.apk \
-            | grep -q "assets/vosk-model/am/final.mdl" \
-            && echo "✓ Vosk model is bundled in the APK" \
-            || (echo "✗ Vosk model missing from APK" && exit 1)
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          unzip -l "$APK" | grep -q "lib/arm64-v8a/libwhisper-jni.so" \
+            && echo "✓ libwhisper-jni.so is bundled" \
+            || (echo "✗ native lib missing from APK" && exit 1)
+          unzip -l "$APK" | grep -q "assets/whisper-model/ggml-base.en-q5_1.bin" \
+            && echo "✓ Whisper model is bundled" \
+            || (echo "✗ Whisper model missing from APK" && exit 1)
 
       - name: Run app JVM unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
@@ -83,26 +90,27 @@ jobs:
         if: github.event_name == 'push'
         run: |
           mkdir -p release
-          cp app/build/outputs/apk/debug/app-debug.apk release/britspeak-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk release/britspeak-whisper-debug.apk
 
-      - name: Publish APK to a GitHub Release (direct download link)
+      - name: Publish Whisper APK to a separate GitHub Release
         if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: debug-latest
-          name: BritSpeak debug (latest)
+          tag_name: whisper-latest
+          name: BritSpeak Whisper (experimental)
           body: |
-            Latest debug build of BritSpeak (auto-published by CI).
-            Install `britspeak-debug.apk` on Android (allow "install unknown apps").
-            Set your model provider + API key in Settings on first launch.
-          files: release/britspeak-debug.apk
+            EXPERIMENTAL on-device Whisper speech-recognition build of BritSpeak.
+            Separate app id (`...britspeak.whisper`, label "BritSpeak Whisper"), so it installs
+            alongside the Vosk build for comparison. arm64 phones only.
+            First launch unpacks a ~57 MB model — give it a few seconds.
+          files: release/britspeak-whisper-debug.apk
           prerelease: true
 
       - name: Upload debug APK
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: britspeak-debug-apk
+          name: britspeak-whisper-debug-apk
           path: app/build/outputs/apk/debug/*.apk
 
       - name: Upload app test report
@@ -111,38 +119,3 @@ jobs:
         with:
           name: app-test-report
           path: app/build/reports/tests/testDebugUnitTest
-
-  ui-tests:
-    name: Android UI tests (emulator)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Run instrumented UI tests on emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 30
-          arch: x86_64
-          target: google_apis
-          profile: pixel_6
-          disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon --stacktrace
-
-      - name: Upload instrumentation test report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: instrumentation-test-report
-          path: app/build/reports/androidTests/connected

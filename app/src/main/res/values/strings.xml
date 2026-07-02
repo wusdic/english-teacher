@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">BritSpeak</string>
+    <string name="app_name">BritSpeak Whisper</string>
     <string name="tagline">Speak English with Emma</string>
 
     <string name="nav_practice">Practice</string>

@@ -21,3 +21,6 @@ secrets.properties
 
 # Bundled offline speech models (fetched at build time by scripts/fetch-models.sh)
 app/src/main/assets/vosk-model/
+app/src/main/assets/whisper-model/
+# Vendored whisper.cpp native source (fetched at build time)
+app/src/main/cpp/whisper/

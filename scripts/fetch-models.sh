@@ -1,36 +1,42 @@
 #!/usr/bin/env bash
-# Downloads the offline speech models bundled into the APK so the app needs no network at
-# runtime. Run before building the Android app (CI does this automatically). Safe to re-run.
+# Whisper branch: fetch the whisper.cpp native source + a Whisper model so the app can do
+# fully-offline, on-device speech recognition. Run before building (CI does this). Safe to re-run.
 set -euo pipefail
 
-ASSETS_DIR="$(cd "$(dirname "$0")/.." && pwd)/app/src/main/assets"
-mkdir -p "$ASSETS_DIR"
-cd "$ASSETS_DIR"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ASSETS_DIR="$ROOT/app/src/main/assets"
+CPP_DIR="$ROOT/app/src/main/cpp/whisper"
+mkdir -p "$ASSETS_DIR" "$CPP_DIR"
 
-# --- Vosk offline English speech-recognition model ---
-# Larger "lgraph" model (~128 MB) — markedly better recognition (especially for accented,
-# non-native English) than the tiny 40 MB small model, while still bundling into the APK and
-# running fully offline. Change MODEL_NAME to swap models; the version is tracked in the uuid
-# marker so switching triggers a re-download instead of silently keeping the old model.
-MODEL_NAME="vosk-model-en-us-0.22-lgraph"
-VOSK_URL="https://alphacephei.com/vosk/models/${MODEL_NAME}.zip"
-VOSK_DIR="vosk-model"
+# --- 1. whisper.cpp source (v1.5.4 has the flat ggml layout our CMakeLists expects) ---
+WHISPER_VERSION="1.5.4"
+WHISPER_TARBALL="https://github.com/ggerganov/whisper.cpp/archive/refs/tags/v${WHISPER_VERSION}.tar.gz"
 
-current_marker="$(cat "$VOSK_DIR/uuid" 2>/dev/null || true)"
-if [ "$current_marker" = "$MODEL_NAME" ] && [ -d "$VOSK_DIR/am" ]; then
-  echo "Vosk model '$MODEL_NAME' already present in $ASSETS_DIR/$VOSK_DIR — skipping download."
+if [ -f "$CPP_DIR/whisper.cpp" ] && [ -f "$CPP_DIR/ggml.c" ]; then
+  echo "whisper.cpp source already present in $CPP_DIR — skipping."
 else
-  echo "Downloading Vosk model '$MODEL_NAME'…"
-  rm -rf "$VOSK_DIR" "$MODEL_NAME" vosk.zip
-  curl -fL --retry 3 -o vosk.zip "$VOSK_URL"
-  unzip -q vosk.zip
-  rm -f vosk.zip
-  mv "$MODEL_NAME" "$VOSK_DIR"
-  echo "Vosk model ready at $ASSETS_DIR/$VOSK_DIR"
+  echo "Downloading whisper.cpp v${WHISPER_VERSION} source…"
+  tmp="$(mktemp -d)"
+  curl -fL --retry 3 -o "$tmp/whisper.tar.gz" "$WHISPER_TARBALL"
+  tar -xzf "$tmp/whisper.tar.gz" -C "$tmp"
+  src="$tmp/whisper.cpp-${WHISPER_VERSION}"
+  # Copy just the sources our CMakeLists compiles, plus every header they include.
+  cp "$src/whisper.cpp" "$src/whisper.h" "$CPP_DIR/"
+  cp "$src"/ggml*.c "$src"/ggml*.h "$CPP_DIR/"
+  rm -rf "$tmp"
+  echo "whisper.cpp source ready at $CPP_DIR"
 fi
 
-# vosk-android's StorageService.unpack requires a 'uuid' marker file inside the model dir to
-# decide whether it needs (re)unpacking. The stock model zip does not ship one, which makes
-# unpack fail with "vosk-model/uuid". Write the model name as a stable, version-aware marker.
-echo "$MODEL_NAME" > "$VOSK_DIR/uuid"
-echo "Wrote $VOSK_DIR/uuid marker ($MODEL_NAME)"
+# --- 2. Whisper model (base.en, q5_1 quantised, ~57 MB) ---
+MODEL_DIR="$ASSETS_DIR/whisper-model"
+MODEL_FILE="ggml-base.en-q5_1.bin"
+MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${MODEL_FILE}"
+mkdir -p "$MODEL_DIR"
+
+if [ -f "$MODEL_DIR/$MODEL_FILE" ] && [ -s "$MODEL_DIR/$MODEL_FILE" ]; then
+  echo "Whisper model already present — skipping download."
+else
+  echo "Downloading Whisper model ${MODEL_FILE}…"
+  curl -fL --retry 3 -o "$MODEL_DIR/$MODEL_FILE" "$MODEL_URL"
+  echo "Whisper model ready at $MODEL_DIR/$MODEL_FILE"
+fi

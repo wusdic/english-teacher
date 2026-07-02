@@ -8,8 +8,9 @@ import com.englishteacher.britspeak.data.db.RoomSessionRepository
 import com.englishteacher.britspeak.data.db.SessionDao
 import com.englishteacher.britspeak.speech.AndroidTutorVoice
 import com.englishteacher.britspeak.speech.SpeechToText
+import com.englishteacher.britspeak.speech.WhisperSpeechToText
+// VoskSpeechToText is unused on this Whisper branch but kept in the tree for easy diffing.
 import com.englishteacher.britspeak.speech.TutorVoice
-import com.englishteacher.britspeak.speech.VoskSpeechToText
 import com.englishteacher.core.ai.ConnectionTester
 import com.englishteacher.core.catalog.TopicCatalog
 import com.englishteacher.core.domain.port.Clock
@@ -39,8 +40,9 @@ abstract class BindingsModule {
     @Binds
     abstract fun bindTutorVoice(impl: AndroidTutorVoice): TutorVoice
 
+    // Whisper branch: on-device whisper.cpp recognition instead of Vosk.
     @Binds
-    abstract fun bindSpeechToText(impl: VoskSpeechToText): SpeechToText
+    abstract fun bindSpeechToText(impl: WhisperSpeechToText): SpeechToText
 
     @Binds
     abstract fun bindSessionRepository(impl: RoomSessionRepository): SessionRepository

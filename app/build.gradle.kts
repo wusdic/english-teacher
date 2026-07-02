@@ -11,15 +11,32 @@ android {
     namespace = "com.englishteacher.britspeak"
     compileSdk = 34
 
+    // Distinct applicationId so this experimental Whisper build installs side-by-side with the
+    // Vosk build for direct comparison (branch claude/whisper-stt-experiment).
     defaultConfig {
-        applicationId = "com.englishteacher.britspeak"
+        applicationId = "com.englishteacher.britspeak.whisper"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
-        versionName = "1.0.0"
+        versionName = "1.0.0-whisper"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
+
+        ndk {
+            // arm64 only: covers essentially all phones from the last several years, avoids
+            // 32-bit NEON build quirks, and keeps the APK smaller. (Emulator STT isn't exercised.)
+            abiFilters += "arm64-v8a"
+        }
+    }
+
+    ndkVersion = "26.1.10909125"
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     buildTypes {
