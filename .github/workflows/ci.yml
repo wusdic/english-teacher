@@ -64,7 +64,7 @@ jobs:
         run: |
           test -f app/src/main/cpp/whisper/whisper.cpp
           test -f app/src/main/cpp/whisper/ggml.c
-          test -f app/src/main/assets/whisper-model/ggml-base.en-q5_1.bin
+          test -f app/src/main/assets/whisper-model/ggml-small.en-q5_1.bin
           echo "Model size:"; du -sh app/src/main/assets/whisper-model
 
       - name: Build debug APK
@@ -76,7 +76,7 @@ jobs:
           unzip -l "$APK" | grep -q "lib/arm64-v8a/libwhisper-jni.so" \
             && echo "✓ libwhisper-jni.so is bundled" \
             || (echo "✗ native lib missing from APK" && exit 1)
-          unzip -l "$APK" | grep -q "assets/whisper-model/ggml-base.en-q5_1.bin" \
+          unzip -l "$APK" | grep -q "assets/whisper-model/ggml-small.en-q5_1.bin" \
             && echo "✓ Whisper model is bundled" \
             || (echo "✗ Whisper model missing from APK" && exit 1)
 
@@ -102,7 +102,7 @@ jobs:
             EXPERIMENTAL on-device Whisper speech-recognition build of BritSpeak.
             Separate app id (`...britspeak.whisper`, label "BritSpeak Whisper"), so it installs
             alongside the Vosk build for comparison. arm64 phones only.
-            First launch unpacks a ~57 MB model — give it a few seconds.
+            First launch unpacks a ~180 MB model — give it a few seconds.
           files: release/britspeak-whisper-debug.apk
           prerelease: true
 

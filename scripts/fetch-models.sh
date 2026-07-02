@@ -27,11 +27,16 @@ else
   echo "whisper.cpp source ready at $CPP_DIR"
 fi
 
-# --- 2. Whisper model (base.en, q5_1 quantised, ~57 MB) ---
+# --- 2. Whisper model (small.en, q5_1 quantised, ~181 MB) ---
+# small.en is markedly more accurate than base.en on short, accented utterances; the audio_ctx
+# trimming in whisper-jni keeps short-turn transcription fast enough on modern phones.
 MODEL_DIR="$ASSETS_DIR/whisper-model"
-MODEL_FILE="ggml-base.en-q5_1.bin"
+MODEL_FILE="ggml-small.en-q5_1.bin"
 MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${MODEL_FILE}"
 mkdir -p "$MODEL_DIR"
+
+# Drop superseded model files so they don't get packaged into the APK alongside the new one.
+find "$MODEL_DIR" -name '*.bin' ! -name "$MODEL_FILE" -delete 2>/dev/null || true
 
 if [ -f "$MODEL_DIR/$MODEL_FILE" ] && [ -s "$MODEL_DIR/$MODEL_FILE" ]; then
   echo "Whisper model already present — skipping download."

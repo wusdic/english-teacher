@@ -149,7 +149,13 @@ class WhisperSpeechToText
                 recorder.release()
             }
 
-            if (!endpointer.speechStarted || samples.size < SAMPLE_RATE / 2) {
+            // Require a minimum amount of actual voiced audio, not just a triggered start —
+            // brief noise bursts that sneak past the endpointer get dropped here instead of
+            // being transcribed into hallucinated words the tutor then responds to.
+            if (!endpointer.speechStarted ||
+                endpointer.voicedMs < MIN_VOICED_MS ||
+                samples.size < SAMPLE_RATE / 2
+            ) {
                 // Nothing usable was said — end the turn quietly rather than with an error.
                 main.post { callback.onResult("") }
                 return
@@ -168,16 +174,29 @@ class WhisperSpeechToText
                     val threads = minOf(6, Runtime.getRuntime().availableProcessors())
                     WhisperLib.transcribe(ptr, threads, floats).trim()
                 }
-            main.post {
-                if (text.isBlank()) {
-                    callback.onError("没有听清楚，请再说一遍。")
-                } else {
-                    callback.onResult(text)
-                }
-            }
+            // Whisper is known to hallucinate stock phrases on noise-only audio; treat those (and
+            // blanks) as "nothing said" so the tutor never answers something the learner didn't say.
+            val usable = text.takeUnless { isNoiseHallucination(it) }.orEmpty()
+            main.post { callback.onResult(usable) }
+        }
+
+        /** Classic whisper outputs for noise/music-only input — never real learner speech here. */
+        private fun isNoiseHallucination(text: String): Boolean {
+            val normalized = text.lowercase().trim().trim('.', '!', '?', ',', ' ')
+            return normalized.isEmpty() ||
+                normalized in
+                setOf(
+                    "thank you",
+                    "thanks for watching",
+                    "thank you for watching",
+                    "please subscribe",
+                    "bye",
+                )
         }
 
         private fun ensureModelFile(): File? {
+            // Clean up the previous model generation so it doesn't waste the user's storage.
+            LEGACY_MODEL_FILES.forEach { runCatching { File(context.filesDir, it).delete() } }
             val outFile = File(context.filesDir, MODEL_FILE)
             if (outFile.exists() && outFile.length() > 0) return outFile
             return runCatching {
@@ -191,6 +210,13 @@ class WhisperSpeechToText
         private companion object {
             const val SAMPLE_RATE = 16000
             const val MODEL_ASSET_DIR = "whisper-model"
-            const val MODEL_FILE = "ggml-base.en-q5_1.bin"
+
+            // small.en: markedly better accuracy on short, accented utterances than base.en; the
+            // audio_ctx trimming in the JNI layer keeps short-turn transcription fast enough.
+            const val MODEL_FILE = "ggml-small.en-q5_1.bin"
+            val LEGACY_MODEL_FILES = listOf("ggml-base.en-q5_1.bin")
+
+            /** Minimum voiced audio required before a capture is worth transcribing. */
+            const val MIN_VOICED_MS = 350
         }
     }

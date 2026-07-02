@@ -70,6 +70,11 @@ class ChatViewModel
         // signals onEndOfSpeech before transcription), so submit() must not speak a second one.
         private var fillerAlreadySpoken = false
 
+        // Consecutive hands-free capture windows that ended with nothing said. After a couple of
+        // these the learner has clearly walked away — pause the conversation instead of listening
+        // (and potentially reacting to noise) forever.
+        private var silentTurns = 0
+
         init {
             viewModelScope.launch {
                 val prefs = settingsStore.preferences.first()
@@ -171,6 +176,7 @@ class ChatViewModel
                 return
             }
             conversationActive = true
+            silentTurns = 0
             _state.update { it.copy(conversationActive = true) }
             // If the tutor is mid-speech (e.g. the opener), don't interrupt — we'll auto-listen
             // when it finishes via continueOrIdle().
@@ -181,10 +187,15 @@ class ChatViewModel
         fun stopConversation() {
             conversationActive = false
             acceptingResults = false // ignore any final result the recogniser flushes on stop
+            silentTurns = 0
             _state.update { it.copy(conversationActive = false) }
             stt.stopListening()
             _state.update {
-                if (it.phase == ChatPhase.LISTENING || it.phase == ChatPhase.REPEATING) {
+                // THINKING with no LLM turn in flight means we were only waiting for a recognition
+                // result that we've just chosen to drop — nothing will ever reset the phase, so do
+                // it here or the mic button stays disabled forever.
+                val stuckThinking = it.phase == ChatPhase.THINKING && !it.isBusy
+                if (it.phase == ChatPhase.LISTENING || it.phase == ChatPhase.REPEATING || stuckThinking) {
                     it.copy(phase = ChatPhase.IDLE)
                 } else {
                     it
@@ -296,7 +307,10 @@ class ChatViewModel
                         }
 
                         override fun onResult(text: String) {
-                            if (!acceptingResults) return
+                            if (!acceptingResults) {
+                                settleDroppedRecognition()
+                                return
+                            }
                             acceptingResults = false
                             _state.update { it.copy(partialTranscript = "") }
                             if (listeningForRepeat) {
@@ -307,6 +321,11 @@ class ChatViewModel
                         }
 
                         override fun onError(message: String) {
+                            if (!acceptingResults) {
+                                // A stale error after the learner already stopped — settle quietly.
+                                settleDroppedRecognition()
+                                return
+                            }
                             acceptingResults = false
                             // Also leave hands-free mode so the button state matches reality
                             // (we are no longer listening and won't auto-restart into the error).
@@ -319,16 +338,30 @@ class ChatViewModel
             )
         }
 
+        /** Settles the phase after a recognition result was dropped (learner tapped stop). */
+        private fun settleDroppedRecognition() {
+            _state.update {
+                if (it.phase == ChatPhase.THINKING && !it.isBusy) it.copy(phase = ChatPhase.IDLE) else it
+            }
+        }
+
         private fun submit(text: String) {
             val session = _state.value.session ?: return
             if (text.isBlank()) {
-                // Nothing was said before the capture window ended. In hands-free mode, start a
-                // fresh listen right away — otherwise the red button would claim to be listening
-                // while the recogniser is actually dead until the next tap.
+                // Nothing was said before the capture window ended. Re-listen in hands-free mode,
+                // but only a couple of times: if the learner has clearly walked away, pause the
+                // conversation instead of listening (and reacting to noise) indefinitely.
                 _state.update { it.copy(phase = ChatPhase.IDLE) }
-                maybeContinueListening()
+                silentTurns++
+                if (conversationActive && silentTurns >= MAX_SILENT_TURNS) {
+                    conversationActive = false
+                    _state.update { it.copy(conversationActive = false) }
+                } else {
+                    maybeContinueListening()
+                }
                 return
             }
+            silentTurns = 0
             // Mask the network round-trip with an instant acknowledgement — unless one was
             // already spoken at end-of-capture (see onEndOfSpeech); the first real sentence is
             // enqueued (QUEUE_ADD) right after it, so playback stays seamless.
@@ -441,5 +474,8 @@ class ChatViewModel
         private companion object {
             /** Small beat after the tutor stops speaking before listening again in continuous mode. */
             const val CONTINUOUS_RELISTEN_DELAY_MS = 350L
+
+            /** Consecutive silent capture windows before hands-free mode pauses itself. */
+            const val MAX_SILENT_TURNS = 2
         }
     }

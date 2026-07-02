@@ -37,6 +37,10 @@ class EnergyEndpointer(
     var speechStarted: Boolean = false
         private set
 
+    /** Total duration of above-threshold audio — how much actual voice the turn contains. */
+    var voicedMs: Int = 0
+        private set
+
     private var noiseFloor = Double.NaN
     private var consecutiveLoud = 0
     private var silenceMs = 0
@@ -58,6 +62,7 @@ class EnergyEndpointer(
         val threshold = maxOf(baseSpeechRms, noiseFloor * noiseMultiplier)
         if (rms > threshold) {
             consecutiveLoud++
+            voicedMs += chunkMs
             if (!speechStarted && consecutiveLoud >= startChunksRequired) speechStarted = true
             if (speechStarted) silenceMs = 0
         } else {

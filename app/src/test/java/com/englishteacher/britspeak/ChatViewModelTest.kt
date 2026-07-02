@@ -157,6 +157,38 @@ class ChatViewModelTest {
         override fun release() {}
     }
 
+    /** STT where every listen ends silent — simulates a learner who has walked away. */
+    private class AlwaysBlankStt : SpeechToText {
+        override val isAvailable = true
+        var listens = 0
+
+        override fun startListening(localeTag: String, callback: SttCallback) {
+            listens++
+            callback.onReady()
+            callback.onResult("")
+        }
+
+        override fun stopListening() {}
+
+        override fun release() {}
+    }
+
+    /** STT that signals end-of-capture then holds the result until the test releases it. */
+    private class HoldingStt : SpeechToText {
+        override val isAvailable = true
+        var callback: SttCallback? = null
+
+        override fun startListening(localeTag: String, callback: SttCallback) {
+            this.callback = callback
+            callback.onReady()
+            callback.onEndOfSpeech() // capture over; transcription "in progress"
+        }
+
+        override fun stopListening() {}
+
+        override fun release() {}
+    }
+
     /** STT that starts listening but never returns a result — for testing state toggles safely. */
     private class IdleStt : SpeechToText {
         override val isAvailable = true
@@ -447,6 +479,43 @@ class ChatViewModelTest {
             assertTrue(vm.state.value.conversationActive)
             assertEquals(ChatPhase.LISTENING, vm.state.value.phase)
             assertEquals(2, stt.listens) // a fresh listen actually started
+        }
+
+    @Test
+    fun `hands-free pauses itself after repeated silent windows instead of listening forever`() =
+        runTest {
+            val stt = AlwaysBlankStt()
+            val vm = buildViewModel(stt = stt)
+            vm.startOnTopic("free_chat")
+            vm.startConversation()
+            advanceUntilIdle()
+
+            // Two consecutive silent windows → conversation pauses rather than looping forever.
+            assertFalse(vm.state.value.conversationActive)
+            assertEquals(ChatPhase.IDLE, vm.state.value.phase)
+            assertEquals(2, stt.listens)
+        }
+
+    @Test
+    fun `stopping while a recognition is in flight cannot leave the button disabled`() =
+        runTest {
+            // Regression: tap stop while whisper is transcribing (phase THINKING via
+            // onEndOfSpeech) → the dropped result never reset the phase, so canSpeak stayed
+            // false and the start button appeared grey/dead forever.
+            val stt = HoldingStt()
+            val vm = buildViewModel(stt = stt)
+            vm.startOnTopic("free_chat")
+            vm.startConversation() // listen → capture ends → filler → THINKING
+            assertEquals(ChatPhase.THINKING, vm.state.value.phase)
+
+            vm.stopConversation()
+            assertEquals(ChatPhase.IDLE, vm.state.value.phase)
+            assertTrue(vm.state.value.canSpeak) // button usable again
+
+            // The late transcription result arrives after stop: dropped, state stays settled.
+            stt.callback?.onResult("late result")
+            assertEquals(ChatPhase.IDLE, vm.state.value.phase)
+            assertEquals(1, vm.state.value.session?.messages?.size) // opener only — not submitted
         }
 
     @Test
